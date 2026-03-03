@@ -4,6 +4,7 @@ import type {
   BatchTranscribeResponse,
   TranscribeOptions,
   EnsembleTranscribeResponse,
+  EnsembleLlmRole,
   UrlTranscribeResponse,
   TaskResultResponse,
   VideoTranscribeResponse,
@@ -22,6 +23,11 @@ export interface TranscribeWithProgressOptions extends TranscribeOptions {
    * This is merged with UI-derived options like speaker label style.
    */
   asrOptionsText?: string
+}
+
+export type EnsembleTranscribeWithProgressOptions = Omit<TranscribeWithProgressOptions, 'llm_role'> & {
+  llm_role?: EnsembleLlmRole
+  include_srt?: boolean
 }
 
 export interface UrlTranscribeOptions extends TranscribeOptions {
@@ -131,9 +137,9 @@ export async function transcribeAudio(
  */
 export async function transcribeAllModels(
   file: File,
-  options: TranscribeWithProgressOptions = {}
+  options: EnsembleTranscribeWithProgressOptions = {}
 ): Promise<EnsembleTranscribeResponse> {
-  const { onUploadProgress, signal, asrOptionsText, ...transcribeOptions } = options
+  const { onUploadProgress, signal, asrOptionsText, include_srt, ...transcribeOptions } = options
   const formData = new FormData()
   formData.append('file', file)
 
@@ -152,6 +158,9 @@ export async function transcribeAllModels(
   }
   if (transcribeOptions.llm_role) {
     formData.append('llm_role', transcribeOptions.llm_role)
+  }
+  if (include_srt !== undefined) {
+    formData.append('include_srt', String(include_srt))
   }
   if (transcribeOptions.hotwords) {
     formData.append('hotwords', transcribeOptions.hotwords)

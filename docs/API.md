@@ -239,7 +239,7 @@ Content-Type: multipart/form-data
 | with_speaker | bool | ❌ | false | 是否启用说话人识别 |
 | apply_hotword | bool | ❌ | true | 是否应用热词纠错 |
 | apply_llm | bool | ❌ | false | 是否启用 LLM 润色 |
-| llm_role | string | ❌ | "default" | LLM 角色 (default/translator/code/corrector) |
+| llm_role | string | ❌ | "default" | LLM 角色（单模型润色）。推荐（政务/政策会议）：`policy_polish_strict` / `policy_polish_balanced` / `policy_polish_aggressive` |
 | include_srt | bool | ❌ | false | 是否在响应中包含 `srt` 字幕内容（基于 `sentences/speaker_turns` 生成） |
 | hotwords | string | ❌ | null | 临时热词 (空格分隔) |
 | asr_options | string | ❌ | null | 请求级调参 JSON 字符串（例如 `{"postprocess": {...}}`） |
@@ -304,7 +304,7 @@ Content-Type: multipart/form-data
 | with_speaker | bool | ❌ | false | 是否启用说话人识别 |
 | apply_hotword | bool | ❌ | true | 是否应用热词纠错 |
 | apply_llm | bool | ❌ | false | 是否启用 LLM 润色 |
-| llm_role | string | ❌ | "default" | LLM 角色 |
+| llm_role | string | ❌ | "default" | LLM 角色（单模型润色）。推荐（政务/政策会议）：`policy_polish_strict` / `policy_polish_balanced` / `policy_polish_aggressive` |
 | hotwords | string | ❌ | null | 临时热词 |
 | asr_options | string | ❌ | null | 请求级调参 JSON 字符串（同单文件） |
 | max_concurrent | int | ❌ | 3 | 最大并发数 |
@@ -366,7 +366,7 @@ Content-Type: multipart/form-data
 | with_speaker | bool | ❌ | true | 是否启用说话人（推荐开启，作为 base turns 骨架） |
 | apply_hotword | bool | ❌ | true | 是否应用热词纠错 |
 | apply_llm | bool | ❌ | true | 是否调用 LLM 做融合润色（依赖 `LLM_ENABLE=true` 配置） |
-| llm_role | string | ❌ | "policy_meeting_aggressive" | LLM 角色（推荐 `policy_meeting_aggressive` / `policy_meeting_v2`） |
+| llm_role | string | ❌ | "policy_meeting_aggressive" | LLM 角色（多模型融合）：`policy_meeting`（严格）/ `policy_meeting_v2`（平衡）/ `policy_meeting_aggressive`（激进） |
 | include_srt | bool | ❌ | true | 是否在 `final` 中包含 `srt` 字幕内容 |
 | hotwords | string | ❌ | null | 临时热词 (空格分隔) |
 | asr_options | string | ❌ | null | 请求级调参 JSON 字符串（同单文件） |

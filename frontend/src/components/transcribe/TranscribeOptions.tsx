@@ -47,6 +47,8 @@ export function TranscribeOptions() {
   const {
     options,
     setOptions,
+    ensembleOptions,
+    setEnsembleOptions,
     tempHotwords,
     setTempHotwords,
     advancedAsrOptionsText,
@@ -284,8 +286,8 @@ export function TranscribeOptions() {
             <div className="flex items-center gap-3">
               <Sparkles className="h-5 w-5 text-muted-foreground" />
               <div>
-                <Label htmlFor="llm" className="text-base">LLM 润色</Label>
-                <p className="text-sm text-muted-foreground">使用大语言模型优化文本</p>
+                <Label htmlFor="llm" className="text-base">LLM 润色（单模型）</Label>
+                <p className="text-sm text-muted-foreground">影响「开始转写 / 批量 / URL转写」</p>
               </div>
             </div>
             <Switch
@@ -309,18 +311,71 @@ export function TranscribeOptions() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="default">默认 (通用纠错)</SelectItem>
-                  <SelectItem value="meeting">会议 (最小改动纠错)</SelectItem>
-                  <SelectItem value="policy_meeting_aggressive">政策听记 (激进纠错)</SelectItem>
-                  <SelectItem value="policy_meeting_v2">政策听记 v2 (更积极纠错)</SelectItem>
-                  <SelectItem value="policy_meeting">政策听记 (多模型融合)</SelectItem>
-                  <SelectItem value="translator">翻译助手</SelectItem>
-                  <SelectItem value="code">代码助手</SelectItem>
-                  <SelectItem value="corrector">专业校对</SelectItem>
+                  <SelectItem value="policy_polish_strict">政务听记（严格）</SelectItem>
+                  <SelectItem value="policy_polish_balanced">政务听记（平衡）</SelectItem>
+                  <SelectItem value="policy_polish_aggressive">政务听记（激进）</SelectItem>
+                  <SelectItem value="meeting">通用：会议（最小改动）</SelectItem>
+                  <SelectItem value="corrector">通用：专业校对</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           )}
+        </div>
+
+        {/* 全量优化（多模型融合） */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Sparkles className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <Label htmlFor="ensemble-llm" className="text-base">LLM 融合（全量优化）</Label>
+                <p className="text-sm text-muted-foreground">仅影响「全量优化」按钮</p>
+              </div>
+            </div>
+            <Switch
+              id="ensemble-llm"
+              checked={ensembleOptions.apply_llm}
+              onCheckedChange={(checked) => setEnsembleOptions({ apply_llm: checked })}
+            />
+          </div>
+
+          <div className="ml-8 space-y-3">
+            {ensembleOptions.apply_llm && (
+              <div className="space-y-2">
+                <Label htmlFor="ensemble-llm-role" className="flex items-center gap-2">
+                  <Bot className="h-4 w-4" />
+                  融合提示词
+                </Label>
+                <Select
+                  value={ensembleOptions.llm_role}
+                  onValueChange={(value) =>
+                    setEnsembleOptions({ llm_role: value as typeof ensembleOptions.llm_role })
+                  }
+                >
+                  <SelectTrigger id="ensemble-llm-role">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="policy_meeting">政策听记（严格）</SelectItem>
+                    <SelectItem value="policy_meeting_v2">政策听记（平衡）</SelectItem>
+                    <SelectItem value="policy_meeting_aggressive">政策听记（激进）</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="ensemble-include-srt" className="text-sm">返回 SRT 字幕</Label>
+                <p className="text-xs text-muted-foreground">响应里 `final.srt` 会更大，但方便下载/导出</p>
+              </div>
+              <Switch
+                id="ensemble-include-srt"
+                checked={ensembleOptions.include_srt}
+                onCheckedChange={(checked) => setEnsembleOptions({ include_srt: checked })}
+              />
+            </div>
+          </div>
         </div>
 
         {/* 临时热词 */}

@@ -26,6 +26,7 @@ import httpx
 
 from src.config import settings
 from src.core.speaker import SpeakerLabeler
+from src.core.llm.roles import get_role
 
 # Reuse the well-tested HTTP + parsing helpers from the original module.
 from src.core.ensemble import (  # noqa: PLC0415
@@ -220,6 +221,11 @@ async def transcribe_all_models(
         if llm_role is not None and str(llm_role).strip()
         else str(getattr(settings, "ensemble_llm_role", "") or "").strip() or "policy_meeting_aggressive"
     )
+    # Ensure response exposes the *actual* role used (get_role() falls back to default).
+    try:
+        llm_role_used = get_role(llm_role_effective).name
+    except Exception:
+        llm_role_used = llm_role_effective
     timeout_s = float(getattr(settings, "ensemble_timeout_s", 600.0) or 600.0)
     max_concurrent = int(getattr(settings, "ensemble_max_concurrent", 4) or 4)
     if max_concurrent <= 0:
@@ -303,7 +309,7 @@ async def transcribe_all_models(
                 base_turns=[t for t in base_turns_any if isinstance(t, dict)],
                 candidates=candidates,
                 base_backend=base_backend_effective,
-                role_name=llm_role_effective,
+                role_name=llm_role_used,
             )
             llm_used = polished_map is not None
         except Exception as e:
@@ -398,7 +404,7 @@ async def transcribe_all_models(
         "code": 0,
         "base_backend": base_backend,
         "llm_used": bool(llm_used),
-        "llm_role": llm_role_effective,
+        "llm_role": llm_role_used,
         "candidates": candidate_payload,
         "final": final_obj,
     }

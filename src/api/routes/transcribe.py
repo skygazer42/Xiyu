@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["transcribe"])
 
+_ENSEMBLE_LLM_ROLES = {
+    "policy_meeting",
+    "policy_meeting_v2",
+    "policy_meeting_aggressive",
+}
+
 
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe_audio(
@@ -27,7 +33,13 @@ async def transcribe_audio(
     with_speaker: bool = Form(default=False, description="是否进行说话人识别"),
     apply_hotword: bool = Form(default=True, description="是否应用热词纠错"),
     apply_llm: bool = Form(default=False, description="是否应用LLM润色"),
-    llm_role: str = Form(default="default", description="LLM角色 (default/translator/code)"),
+    llm_role: str = Form(
+        default="default",
+        description=(
+            "LLM 角色（单模型润色）。推荐（政务/政策会议）："
+            "policy_polish_strict / policy_polish_balanced / policy_polish_aggressive"
+        ),
+    ),
     include_srt: bool = Form(default=False, description="是否在响应中包含 SRT 字幕内容"),
     hotwords: Optional[str] = Form(default=None, description="额外热词 (空格分隔)"),
     asr_options: Optional[str] = Form(default=None, description="ASR options JSON (per-request tuning)"),
@@ -41,6 +53,15 @@ async def transcribe_audio(
         raise HTTPException(status_code=400, detail="请上传音频文件")
 
     metrics.increment_requests()
+
+    if apply_llm and llm_role in _ENSEMBLE_LLM_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"llm_role={llm_role!r} is an ensemble role for /api/v1/transcribe/all. "
+                "For /api/v1/transcribe use: policy_polish_strict / policy_polish_balanced / policy_polish_aggressive."
+            ),
+        )
 
     parsed_asr_options = None
     try:
@@ -103,7 +124,13 @@ async def transcribe_batch(
     with_speaker: bool = Form(default=False, description="是否进行说话人识别"),
     apply_hotword: bool = Form(default=True, description="是否应用热词纠错"),
     apply_llm: bool = Form(default=False, description="是否应用LLM润色"),
-    llm_role: str = Form(default="default", description="LLM角色"),
+    llm_role: str = Form(
+        default="default",
+        description=(
+            "LLM 角色（单模型润色）。推荐（政务/政策会议）："
+            "policy_polish_strict / policy_polish_balanced / policy_polish_aggressive"
+        ),
+    ),
     hotwords: Optional[str] = Form(default=None, description="额外热词"),
     asr_options: Optional[str] = Form(default=None, description="ASR options JSON (per-request tuning)"),
     max_concurrent: int = Form(default=3, description="最大并发数"),
@@ -117,6 +144,15 @@ async def transcribe_batch(
         raise HTTPException(status_code=400, detail="请上传至少一个音频文件")
 
     metrics.increment_requests()
+
+    if apply_llm and llm_role in _ENSEMBLE_LLM_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"llm_role={llm_role!r} is an ensemble role for /api/v1/transcribe/all. "
+                "For /api/v1/transcribe/batch use: policy_polish_strict / policy_polish_balanced / policy_polish_aggressive."
+            ),
+        )
 
     parsed_asr_options = None
     try:
@@ -204,7 +240,7 @@ async def transcribe_all_models_api(
     apply_llm: bool = Form(default=True, description="是否调用 LLM 进行多模型融合润色"),
     llm_role: str = Form(
         default="policy_meeting_aggressive",
-        description="LLM 角色（policy_meeting_aggressive/policy_meeting_v2/policy_meeting/meeting/...）",
+        description="LLM 角色（政策会议多模型融合）：policy_meeting（严格）/policy_meeting_v2（平衡）/policy_meeting_aggressive（激进）",
     ),
     include_srt: bool = Form(default=True, description="是否在 final 中包含 SRT 字幕内容"),
     hotwords: Optional[str] = Form(default=None, description="额外热词 (空格分隔)"),
@@ -215,6 +251,15 @@ async def transcribe_all_models_api(
         raise HTTPException(status_code=400, detail="请上传音频文件")
 
     metrics.increment_requests()
+
+    if apply_llm and llm_role not in _ENSEMBLE_LLM_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported llm_role for /api/v1/transcribe/all: {llm_role!r}. "
+                f"Must be one of: {sorted(_ENSEMBLE_LLM_ROLES)}"
+            ),
+        )
 
     parsed_asr_options = None
     try:

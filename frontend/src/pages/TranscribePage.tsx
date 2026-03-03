@@ -30,6 +30,7 @@ export default function TranscribePage() {
   const {
     files,
     options,
+    ensembleOptions,
     tempHotwords,
     advancedAsrOptionsText,
     advancedAsrOptionsError,
@@ -364,22 +365,21 @@ export default function TranscribePage() {
     setResult(null)
     setResultFilename(undefined)
 
-    try {
-      const transcribeOptions = {
-        ...options,
-        apply_llm: true,
-        // Default to the policy role for this button unless user explicitly chose another.
-        llm_role:
-          options.llm_role && options.llm_role !== 'default'
-            ? options.llm_role
-            : 'policy_meeting_aggressive',
-        hotwords: tempHotwords || undefined,
-        asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
-      }
-
-      const response = await transcribeAllModels(files[0], {
-        ...transcribeOptions,
-        signal: abortControllerRef.current?.signal,
+	    try {
+	      const transcribeOptions = {
+	        with_speaker: options.with_speaker,
+	        apply_hotword: options.apply_hotword,
+	        apply_llm: ensembleOptions.apply_llm,
+	        llm_role: ensembleOptions.llm_role,
+	        include_srt: ensembleOptions.include_srt,
+	        hotwords: tempHotwords || undefined,
+	        asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
+	        speaker_label_style: options.speaker_label_style,
+	      }
+	
+	      const response = await transcribeAllModels(files[0], {
+	        ...transcribeOptions,
+	        signal: abortControllerRef.current?.signal,
         onUploadProgress: (progress) => {
           const p = Math.max(0, Math.min(100, progress))
           if (p >= 99) {
@@ -390,26 +390,26 @@ export default function TranscribePage() {
           setUploadProgress(p)
         },
       })
-      if (response.code === 0) {
-        setEnsembleResult(response)
-        setResult(response.final)
-        setResultFilename(files[0].name.replace(/\.[^/.]+$/, ''))
-        addItem({
-          filename: files[0].name,
-          text: response.final.text,
-          sentences: response.final.sentences,
-          rawText: response.final.raw_text,
-          options: {
-            withSpeaker: options.with_speaker,
-            applyHotword: options.apply_hotword,
-            applyLlm: true,
-            llmRole: transcribeOptions.llm_role,
-          },
-        })
-        toast.success('全量融合完成')
-      } else {
-        toast.error('全量融合失败')
-      }
+	      if (response.code === 0) {
+	        setEnsembleResult(response)
+	        setResult(response.final)
+	        setResultFilename(files[0].name.replace(/\.[^/.]+$/, ''))
+	        addItem({
+	          filename: files[0].name,
+	          text: response.final.text,
+	          sentences: response.final.sentences,
+	          rawText: response.final.raw_text,
+	          options: {
+	            withSpeaker: options.with_speaker,
+	            applyHotword: options.apply_hotword,
+	            applyLlm: ensembleOptions.apply_llm,
+	            llmRole: ensembleOptions.llm_role,
+	          },
+	        })
+	        toast.success(ensembleOptions.apply_llm ? '全量融合完成' : '全量对比完成')
+	      } else {
+	        toast.error('全量融合失败')
+	      }
     } catch (error) {
       console.error('Ensemble transcription error:', error)
       const isCanceled =
@@ -601,14 +601,14 @@ export default function TranscribePage() {
                       </>
                     )}
                   </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={handleTranscribeAllModels}
-                    disabled={files.length !== 1 || isTranscribing}
-                    title="同时跑全部模型并做 LLM 融合润色（耗时更长）"
-                  >
-                    全量优化
-                  </Button>
+	                  <Button
+	                    variant="secondary"
+	                    onClick={handleTranscribeAllModels}
+	                    disabled={files.length !== 1 || isTranscribing}
+	                    title="同时跑全部模型（可选 LLM 融合润色，耗时更长）"
+	                  >
+	                    全量优化
+	                  </Button>
                   {isTranscribing && (
                     <Button variant="outline" onClick={handleCancel} title="取消当前请求（不会影响服务端已在跑的推理）">
                       取消
@@ -639,12 +639,14 @@ export default function TranscribePage() {
                         <CircularProgressIndeterminate size="sm" />
                         <div className="flex-1">
                           <p className="text-sm font-medium">处理中...</p>
-                          <p className="text-xs text-muted-foreground">
-                            全量优化会并发调用多个模型 + LLM 融合润色（已用时 {formatElapsed(elapsedMs)}）
-                          </p>
-                        </div>
-                      </div>
-                    )}
+	                          <p className="text-xs text-muted-foreground">
+	                            全量优化会并发调用多个模型
+	                            {ensembleOptions.apply_llm ? ' + LLM 融合润色' : '（不使用 LLM）'}
+	                            （已用时 {formatElapsed(elapsedMs)}）
+	                          </p>
+	                        </div>
+	                      </div>
+	                    )}
                   </div>
                 )}
               </>

@@ -1,5 +1,11 @@
 import { create } from 'zustand'
-import type { TranscribeResponse, TranscribeOptions, SentenceInfo } from '@/lib/api/types'
+import type { TranscribeResponse, TranscribeOptions, SentenceInfo, EnsembleLlmRole } from '@/lib/api/types'
+
+interface EnsembleOptions {
+  apply_llm: boolean
+  llm_role: EnsembleLlmRole
+  include_srt: boolean
+}
 
 interface TranscriptionState {
   // 当前转写结果
@@ -9,6 +15,10 @@ interface TranscriptionState {
   // 转写选项
   options: TranscribeOptions
   setOptions: (options: Partial<TranscribeOptions>) => void
+
+  // 全量优化（多模型融合）选项
+  ensembleOptions: EnsembleOptions
+  setEnsembleOptions: (options: Partial<EnsembleOptions>) => void
 
   // 高级 asr_options（JSON 文本，直接透传到后端的 allowlist 解析）
   advancedAsrOptionsText: string
@@ -43,8 +53,14 @@ const defaultOptions: TranscribeOptions = {
   with_speaker: true,
   apply_hotword: true,
   apply_llm: false,
-  llm_role: 'default',
+  llm_role: 'policy_polish_balanced',
   speaker_label_style: 'numeric',
+}
+
+const defaultEnsembleOptions: EnsembleOptions = {
+  apply_llm: true,
+  llm_role: 'policy_meeting_aggressive',
+  include_srt: true,
 }
 
 export const useTranscriptionStore = create<TranscriptionState>((set) => ({
@@ -56,6 +72,11 @@ export const useTranscriptionStore = create<TranscriptionState>((set) => ({
   options: defaultOptions,
   setOptions: (options) =>
     set((state) => ({ options: { ...state.options, ...options } })),
+
+  // 全量优化选项
+  ensembleOptions: defaultEnsembleOptions,
+  setEnsembleOptions: (options) =>
+    set((state) => ({ ensembleOptions: { ...state.ensembleOptions, ...options } })),
 
   // 高级 asr_options
   advancedAsrOptionsText: '',
@@ -95,5 +116,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set) => ({
       tempHotwords: '',
       advancedAsrOptionsText: '',
       advancedAsrOptionsError: null,
+      options: defaultOptions,
+      ensembleOptions: defaultEnsembleOptions,
     }),
 }))

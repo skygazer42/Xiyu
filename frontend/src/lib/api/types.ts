@@ -192,19 +192,23 @@ export interface ConfigUpdateRequest {
 }
 
 // 转写请求选项
+export type SingleLlmRole =
+  | 'default'
+  | 'meeting'
+  | 'corrector'
+  | 'translator'
+  | 'code'
+  | 'policy_polish_strict'
+  | 'policy_polish_balanced'
+  | 'policy_polish_aggressive'
+
+export type EnsembleLlmRole = 'policy_meeting' | 'policy_meeting_v2' | 'policy_meeting_aggressive'
+
 export interface TranscribeOptions {
   with_speaker?: boolean
   apply_hotword?: boolean
   apply_llm?: boolean
-  llm_role?:
-    | 'default'
-    | 'translator'
-    | 'code'
-    | 'corrector'
-    | 'meeting'
-    | 'policy_meeting'
-    | 'policy_meeting_v2'
-    | 'policy_meeting_aggressive'
+  llm_role?: SingleLlmRole
   hotwords?: string
   speaker_label_style?: 'numeric' | 'zh'
 }
