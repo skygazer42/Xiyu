@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CircularProgressIndeterminate } from '@/components/ui/circular-progress'
 import { Loader2, Play, FileAudio, Link } from 'lucide-react'
 import { FileDropzone } from '@/components/upload'
@@ -31,6 +32,7 @@ export default function TranscribePage() {
     files,
     options,
     ensembleOptions,
+    setEnsembleOptions,
     tempHotwords,
     advancedAsrOptionsText,
     advancedAsrOptionsError,
@@ -53,6 +55,17 @@ export default function TranscribePage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [transcribePhase, setTranscribePhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
   const [elapsedMs, setElapsedMs] = useState(0)
+
+  const ensembleQuickMode = useMemo(() => {
+    if (!ensembleOptions.apply_llm) {
+      return 'compare'
+    }
+    return ensembleOptions.llm_role
+  }, [ensembleOptions.apply_llm, ensembleOptions.llm_role])
+
+  const ensembleButtonLabel = useMemo(() => {
+    return ensembleOptions.apply_llm ? '全量优化' : '全量对比'
+  }, [ensembleOptions.apply_llm])
 
   const urlPollingTimersRef = useRef<Record<string, number>>({})
   const urlPollingStartedAtRef = useRef<Record<string, number>>({})
@@ -628,8 +641,29 @@ export default function TranscribePage() {
 	                    disabled={files.length !== 1 || isTranscribing}
 	                    title="同时跑全部模型（可选 LLM 融合润色，耗时更长）"
 	                  >
-	                    全量优化
+	                    {ensembleButtonLabel}
 	                  </Button>
+	                  <Select
+	                    value={ensembleQuickMode}
+	                    onValueChange={(value) => {
+	                      if (value === 'compare') {
+	                        setEnsembleOptions({ apply_llm: false })
+	                        return
+	                      }
+	                      setEnsembleOptions({ apply_llm: true, llm_role: value as typeof ensembleOptions.llm_role })
+	                    }}
+	                    disabled={isTranscribing}
+	                  >
+	                    <SelectTrigger size="sm" className="min-w-[9.5rem]" title="全量优化：LLM 融合润色程度">
+	                      <SelectValue placeholder="融合程度" />
+	                    </SelectTrigger>
+	                    <SelectContent align="end">
+	                      <SelectItem value="compare">仅对比（不走 LLM）</SelectItem>
+	                      <SelectItem value="policy_meeting">严格（少改动）</SelectItem>
+	                      <SelectItem value="policy_meeting_v2">平衡（推荐）</SelectItem>
+	                      <SelectItem value="policy_meeting_aggressive">激进（尽量纠错）</SelectItem>
+	                    </SelectContent>
+	                  </Select>
                   {isTranscribing && (
                     <Button variant="outline" onClick={handleCancel} title="取消当前请求（不会影响服务端已在跑的推理）">
                       取消
