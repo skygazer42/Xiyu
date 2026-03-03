@@ -2,7 +2,6 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -169,42 +168,31 @@ export function TranscribeOptions() {
             )}
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="backend">快速选择</Label>
-              <Select
-                value={selectedBackendValue}
-                onValueChange={(value) => {
-                  const hit = backendOptions.find((b) => b.value === value)
-                  const nextBaseUrl = hit ? hit.baseUrl : value
-                  setBaseUrl(nextBaseUrl)
-                }}
-              >
-                <SelectTrigger id="backend">
-                  <SelectValue placeholder="选择后端..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {backendOptions.map((b) => (
-                    <SelectItem key={b.value} value={b.value}>
-                      {b.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="backend">快速选择</Label>
+            <Select
+              value={selectedBackendValue}
+              onValueChange={(value) => {
+                const hit = backendOptions.find((b) => b.value === value)
+                const nextBaseUrl = hit ? hit.baseUrl : value
+                setBaseUrl(nextBaseUrl)
+              }}
+            >
+              <SelectTrigger id="backend">
+                <SelectValue placeholder="选择后端..." />
+              </SelectTrigger>
+              <SelectContent>
+                {backendOptions.map((b) => (
+                  <SelectItem key={b.value} value={b.value}>
+                    {b.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-            <div className="space-y-2">
-              <Label htmlFor="backend-base-url">Base URL</Label>
-              <Input
-                id="backend-base-url"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="例如: http://localhost:8101"
-              />
-              <p className="text-xs text-muted-foreground">
-                为空表示使用当前页面域名（适合前后端同源部署）。
-              </p>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              当前 API：{baseUrl ? baseUrl : '相对路径（同源部署）'}
+            </p>
           </div>
         </div>
 
