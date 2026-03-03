@@ -12,7 +12,7 @@ from src.api.schemas import (
 from src.api.dependencies import process_audio_file
 from src.api.asr_options import parse_asr_options
 from src.core.engine import transcription_engine
-from src.core.ensemble import transcribe_all_models
+from src.core.ensemble_v2 import transcribe_all_models
 from src.utils.service_metrics import metrics
 from src.utils.subtitles import generate_srt_from_result
 
