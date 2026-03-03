@@ -58,10 +58,84 @@ class DiarizerEngine:
             if self._loaded:
                 return
 
+            # Compatibility patch:
+            # - pyannote.audio Pipeline.from_pretrained (3.x) passes `use_auth_token=...`
+            # - huggingface_hub (>=1.0) removed `use_auth_token` in favor of `token`
+            # Without this shim, diarization fails at runtime with:
+            #   hf_hub_download() got an unexpected keyword argument 'use_auth_token'
+            try:
+                import inspect
+
+                import huggingface_hub  # type: ignore[import-not-found]
+                from huggingface_hub import hf_hub_download as _orig_hf_hub_download  # type: ignore[import-not-found]
+
+                if "use_auth_token" not in inspect.signature(_orig_hf_hub_download).parameters:
+
+                    def _hf_hub_download_compat(*args, use_auth_token=None, token=None, **kwargs):
+                        if token is None and use_auth_token is not None:
+                            token = use_auth_token
+                        return _orig_hf_hub_download(*args, token=token, **kwargs)
+
+                    # Patch both common import paths before importing pyannote.audio.
+                    huggingface_hub.hf_hub_download = _hf_hub_download_compat  # type: ignore[attr-defined]
+                    try:
+                        import huggingface_hub.file_download as _file_download  # type: ignore[import-not-found]
+
+                        _file_download.hf_hub_download = _hf_hub_download_compat  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            except Exception:
+                # Best-effort only: if this fails for any reason, we still try to proceed.
+                pass
+
             # Lazy heavy imports.
             from pyannote.audio import Pipeline  # type: ignore[import-not-found]
 
             import torch
+
+            # PyTorch 2.6 changed `torch.load(..., weights_only=...)` default to
+            # `True`, which can break loading some HF checkpoints unless certain
+            # globals are allowlisted.
+            #
+            # pyannote pipelines/models are trusted here (downloaded from HF with
+            # an explicit user token), so we allowlist TorchVersion to unblock
+            # weights-only unpickling.
+            try:
+                from torch.torch_version import TorchVersion  # type: ignore[attr-defined]
+
+                if hasattr(torch, "serialization") and hasattr(torch.serialization, "add_safe_globals"):
+                    torch.serialization.add_safe_globals([TorchVersion])  # type: ignore[arg-type]
+            except Exception:
+                pass
+
+            # pyannote checkpoints may pickle a few lightweight helper classes.
+            # Allowlist them for weights-only loading mode.
+            try:
+                from pyannote.audio.core.task import Specifications  # type: ignore[import-not-found]
+
+                if hasattr(torch, "serialization") and hasattr(torch.serialization, "add_safe_globals"):
+                    torch.serialization.add_safe_globals([Specifications])  # type: ignore[arg-type]
+            except Exception:
+                pass
+
+            # If the checkpoint still fails under weights-only mode, prefer the
+            # legacy behavior (weights_only=False) for pyannote models we trust.
+            # This matches PyTorch's own guidance for trusted checkpoints.
+            try:
+                import inspect
+
+                _orig_torch_load = torch.load
+                if "weights_only" in inspect.signature(_orig_torch_load).parameters:
+
+                    def _torch_load_compat(*args, **kwargs):
+                        # Force legacy behavior for trusted checkpoints.
+                        # Some upstream libraries explicitly pass weights_only=True.
+                        kwargs["weights_only"] = False
+                        return _orig_torch_load(*args, **kwargs)
+
+                    torch.load = _torch_load_compat  # type: ignore[assignment]
+            except Exception:
+                pass
 
             pipeline = Pipeline.from_pretrained(self.model_id, use_auth_token=self.hf_token)
             if pipeline is None:

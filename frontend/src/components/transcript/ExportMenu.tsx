@@ -31,7 +31,7 @@ export function ExportMenu({ result, filename = 'transcript' }: ExportMenuProps)
   }
 
   const handleExportSrt = () => {
-    const srt = generateSrt(result)
+    const srt = (result.srt || '').trim() ? String(result.srt) : generateSrt(result)
     downloadFile(`${filename}.srt`, srt, 'text/plain')
   }
 

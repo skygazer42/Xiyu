@@ -63,15 +63,30 @@ def encode_audio(audio: np.ndarray, encoder_sess) -> tuple:
     """
     import onnxruntime
 
-    # Reshape: (1, 1, audio_len) and cast to float32
-    audio_input = audio.astype(np.float32).reshape(1, 1, -1)
+    # Encoder expects:
+    #   - audio: (float16|float32) [1, 1, samples]
+    #   - ilens: int64            [batch]
+    #
+    # Different exported encoder adaptors use different input dtypes:
+    # - fp16 models take float16 (often GPU-friendly, but can be unstable on CPU)
+    # - int8 models usually take float32
+    try:
+        input_type = str(encoder_sess.get_inputs()[0].type or "")
+    except Exception:
+        input_type = ""
+    want_f16 = "float16" in input_type
+    audio_dtype = np.float16 if want_f16 else np.float32
+    audio_input = audio.astype(audio_dtype, copy=False).reshape(1, 1, -1)
+    ilens = np.array([audio_input.shape[-1]], dtype=np.int64)
 
     in_names = [x.name for x in encoder_sess.get_inputs()]
     out_names = [x.name for x in encoder_sess.get_outputs()]
 
     input_feed = {
-        in_names[0]: onnxruntime.OrtValue.ortvalue_from_numpy(audio_input, 'cpu', 0)
+        in_names[0]: onnxruntime.OrtValue.ortvalue_from_numpy(audio_input, 'cpu', 0),
     }
+    if len(in_names) >= 2:
+        input_feed[in_names[1]] = onnxruntime.OrtValue.ortvalue_from_numpy(ilens, 'cpu', 0)
 
     outputs = encoder_sess.run_with_ort_values(out_names, input_feed)
 

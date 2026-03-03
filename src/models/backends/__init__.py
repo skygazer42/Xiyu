@@ -93,7 +93,9 @@ def get_backend(
 
     elif backend_type == "whisper":
         from .whisper import WhisperBackend
-        return WhisperBackend(**kwargs)
+        # Keep behavior consistent with other backends: honor the shared `device`
+        # argument (set via Settings.DEVICE / docker compose `DEVICE=...`).
+        return WhisperBackend(device=device, **kwargs)
 
     else:
         raise ValueError(f"不支持的后端类型: {backend_type}")

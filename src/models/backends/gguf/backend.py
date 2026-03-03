@@ -68,9 +68,11 @@ class GGUFBackend(ASRBackend):
             encoder_path,
             kind="encoder",
             candidate_filenames=[
+                # GGUF is typically CPU-only; prefer int8 to avoid fp16 CPU NaNs
+                # on some onnxruntime CPU kernels.
+                "Fun-ASR-Nano-Encoder-Adaptor.int8.onnx",
                 "Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx",
                 "Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx",
-                "Fun-ASR-Nano-Encoder-Adaptor.int8.onnx",
             ],
         )
         resolved_ctc_path = self._resolve_artifact_path(
@@ -118,6 +120,8 @@ class GGUFBackend(ASRBackend):
         self._ctc_sess = None
         self._model = None
         self._ctx = None
+        self._ctx_n_ctx = None
+        self._ctx_n_batch = None
         self._vocab = None
         self._eos_token = None
         self._embedding_table = None
@@ -313,13 +317,38 @@ class GGUFBackend(ASRBackend):
     def _create_context(self):
         """创建 LLM 上下文"""
         ctx_params = llama_lib.llama_context_default_params()
-        ctx_params.n_ctx = 2048
-        ctx_params.n_batch = 2048
+        # NOTE: llama.cpp enforces `n_tokens_all <= n_batch` for each decode call.
+        # We inject one embedding token per audio frame, so long audio chunks can
+        # exceed the default 2048 and trigger a hard assert (process abort).
+        #
+        # Make this configurable via env:
+        #   GGUF_N_CTX / GGUF_N_BATCH
+        # and keep a sane lower bound for compatibility.
+        try:
+            n_ctx = int(getattr(settings, "gguf_n_ctx", 2048) or 2048)
+        except Exception:
+            n_ctx = 2048
+        if n_ctx <= 0:
+            n_ctx = 2048
+
+        try:
+            n_batch = int(getattr(settings, "gguf_n_batch", n_ctx) or n_ctx)
+        except Exception:
+            n_batch = n_ctx
+        if n_batch <= 0:
+            n_batch = n_ctx
+        if n_batch > n_ctx:
+            n_batch = n_ctx
+
+        ctx_params.n_ctx = n_ctx
+        ctx_params.n_batch = n_batch
         ctx_params.n_ubatch = self.config.n_ubatch
         ctx_params.embeddings = False
         ctx_params.no_perf = True
         ctx_params.n_threads = self.config.n_threads or (os.cpu_count() // 2)
         ctx_params.n_threads_batch = self.config.n_threads_batch or os.cpu_count()
+        self._ctx_n_ctx = n_ctx
+        self._ctx_n_batch = n_batch
         return llama_lib.llama_init_from_model(self._model, ctx_params)
 
     def _build_prompt(self, hotwords: Optional[List[str]] = None):
@@ -450,6 +479,18 @@ class GGUFBackend(ASRBackend):
         # 1. 加载音频
         audio = self._load_audio(audio_input)
 
+        # Some GGUF ONNX exports are brittle on very short chunks (e.g. GatherND
+        # index out of range). Pad with silence to a minimum length so encoder
+        # + CTC have enough frames.
+        try:
+            min_samples = int(getattr(settings, "gguf_min_samples", 0) or 0)
+        except Exception:
+            min_samples = 0
+        if min_samples > 0 and int(audio.shape[0]) < min_samples:
+            pad = min_samples - int(audio.shape[0])
+            if pad > 0:
+                audio = np.pad(audio, (0, pad), mode="constant")
+
         # 2. 音频编码
         t_enc = time.perf_counter()
         audio_embd, enc_output = encode_audio(audio, self._encoder_sess)
@@ -457,8 +498,20 @@ class GGUFBackend(ASRBackend):
 
         # 3. CTC 解码
         t_ctc = time.perf_counter()
-        ctc_logits = self._ctc_sess.run(None, {"enc_output": enc_output})[0]
-        ctc_text, ctc_results = decode_ctc(ctc_logits, self._ctc_id2token)
+        # Different exported CTC heads may expect float32 or float16 inputs.
+        # Match the model input dtype to avoid onnxruntime INVALID_ARGUMENT errors.
+        ctc_in = enc_output
+        try:
+            ctc_input_type = str(self._ctc_sess.get_inputs()[0].type or "")
+        except Exception:
+            ctc_input_type = ""
+        if "float16" in ctc_input_type:
+            ctc_in = enc_output.astype(np.float16, copy=False)
+        elif "float" in ctc_input_type:
+            ctc_in = enc_output.astype(np.float32, copy=False)
+
+        ctc_out = self._ctc_sess.run(None, {"enc_output": ctc_in})[0]
+        ctc_text, ctc_results = decode_ctc(ctc_out, self._ctc_id2token)
         timings.ctc = time.perf_counter() - t_ctc
 
         # 4. 准备 Prompt
@@ -472,6 +525,15 @@ class GGUFBackend(ASRBackend):
         timings.prepare = time.perf_counter() - t_prep
 
         # 5. LLM 解码
+        # Prevent hard llama.cpp asserts by rejecting oversized batches early.
+        n_input_tokens = int(full_embd.shape[0])
+        max_batch = int(self._ctx_n_batch or 0)
+        if max_batch > 0 and n_input_tokens > max_batch:
+            raise ValueError(
+                f"GGUF input too long for llama.cpp batch: n_input_tokens={n_input_tokens} > n_batch={max_batch}. "
+                f"Reduce chunk duration (VAD_MAX_SEGMENT_MS / SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S) "
+                f"or increase GGUF_N_BATCH/GGUF_N_CTX."
+            )
         text, n_gen, t_inject, t_gen = self._decode_llm(full_embd, full_embd.shape[0])
         timings.inject = t_inject
         timings.llm_generate = t_gen
@@ -488,11 +550,23 @@ class GGUFBackend(ASRBackend):
         # 构建句子信息
         sentence_info = []
         if aligned:
-            sentence_info.append({
-                "text": text,
-                "start": aligned[0]["start"] if aligned else 0,
-                "end": aligned[-1]["start"] + 0.1 if aligned else 0,
-            })
+            # align_timestamps returns seconds; TingWu API schema expects ms integers.
+            try:
+                start_s = float(aligned[0].get("start", 0.0) or 0.0)
+            except Exception:
+                start_s = 0.0
+            try:
+                end_s = float(aligned[-1].get("start", start_s) or start_s) + 0.1
+            except Exception:
+                end_s = start_s
+
+            sentence_info.append(
+                {
+                    "text": text,
+                    "start": int(round(max(start_s, 0.0) * 1000.0)),
+                    "end": int(round(max(end_s, start_s) * 1000.0)),
+                }
+            )
 
         return {
             "text": text,

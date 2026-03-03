@@ -5,6 +5,11 @@ python-multipart>=0.0.9
 httpx>=0.26.0
 numpy>=1.24.0
 
+# Keep the torch stack aligned with the base image (pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime).
+# Without pinning, pip can resolve a newer torch build (e.g. cu128) and break torchvision/torchaudio.
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+torchaudio==2.6.0+cu124
+
 # Speaker diarization
 pyannote.audio>=3.1.0
-

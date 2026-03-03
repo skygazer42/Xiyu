@@ -294,6 +294,8 @@ export function TranscribeOptions() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="default">默认 (通用纠错)</SelectItem>
+                  <SelectItem value="meeting">会议 (最小改动纠错)</SelectItem>
+                  <SelectItem value="policy_meeting">政策听记 (多模型融合)</SelectItem>
                   <SelectItem value="translator">翻译助手</SelectItem>
                   <SelectItem value="code">代码助手</SelectItem>
                   <SelectItem value="corrector">专业校对</SelectItem>

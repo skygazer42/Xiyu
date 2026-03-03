@@ -3,6 +3,7 @@ import type {
   TranscribeResponse,
   BatchTranscribeResponse,
   TranscribeOptions,
+  EnsembleTranscribeResponse,
   UrlTranscribeResponse,
   TaskResultResponse,
   VideoTranscribeResponse,
@@ -120,6 +121,69 @@ export async function transcribeAudio(
         : undefined,
     }
   )
+  return response.data
+}
+
+/**
+ * 全量转写：跑全部模型并做 LLM 融合润色
+ *
+ * 注意：该接口会触发多个后端并发推理 + 1 次 LLM 调用，耗时会明显更长。
+ */
+export async function transcribeAllModels(
+  file: File,
+  options: TranscribeWithProgressOptions = {}
+): Promise<EnsembleTranscribeResponse> {
+  const { onUploadProgress, signal, asrOptionsText, ...transcribeOptions } = options
+  const formData = new FormData()
+  formData.append('file', file)
+
+  // These options are still accepted by the backend:
+  // - with_speaker: defaults to true on the backend for /transcribe/all
+  // - apply_hotword: defaults to true
+  // - apply_llm: defaults to true (LLM fusion)
+  if (transcribeOptions.with_speaker !== undefined) {
+    formData.append('with_speaker', String(transcribeOptions.with_speaker))
+  }
+  if (transcribeOptions.apply_hotword !== undefined) {
+    formData.append('apply_hotword', String(transcribeOptions.apply_hotword))
+  }
+  if (transcribeOptions.apply_llm !== undefined) {
+    formData.append('apply_llm', String(transcribeOptions.apply_llm))
+  }
+  if (transcribeOptions.llm_role) {
+    formData.append('llm_role', transcribeOptions.llm_role)
+  }
+  if (transcribeOptions.hotwords) {
+    formData.append('hotwords', transcribeOptions.hotwords)
+  }
+
+  // Per-request ASR tuning (backend validates allowlisted options).
+  let asrOptions: Record<string, unknown> = parseAsrOptionsText(asrOptionsText)
+  if (transcribeOptions.with_speaker) {
+    asrOptions = mergeSpeakerLabelStyle(asrOptions, transcribeOptions.speaker_label_style || 'numeric')
+  }
+  if (Object.keys(asrOptions).length > 0) {
+    formData.append('asr_options', JSON.stringify(asrOptions))
+  }
+
+  const response = await apiClient.post<EnsembleTranscribeResponse>(
+    '/api/v1/transcribe/all',
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      signal,
+      onUploadProgress: onUploadProgress
+        ? (progressEvent) => {
+            const total = progressEvent.total || file.size
+            const progress = Math.round((progressEvent.loaded * 100) / total)
+            onUploadProgress(progress)
+          }
+        : undefined,
+    }
+  )
+
   return response.data
 }
 

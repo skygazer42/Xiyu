@@ -107,6 +107,64 @@ def test_transcribe_with_speaker(client):
         assert "transcript" in result
 
 
+def test_transcribe_include_srt(client):
+    with patch('src.api.routes.transcribe.transcription_engine.transcribe_auto_async', new_callable=AsyncMock) as mock_transcribe_auto_async, \
+         patch('src.api.routes.transcribe.process_audio_file') as mock_process:
+        mock_transcribe_auto_async.return_value = {
+            "text": "你好",
+            "sentences": [{"text": "你好", "start": 0, "end": 500, "speaker": "说话人甲", "speaker_id": 0}],
+            "transcript": "[00:00 - 00:00] 说话人甲: 你好",
+            "raw_text": "你好"
+        }
+
+        async def fake_process(file, preprocess_options=None):
+            yield b"\x00" * 16000
+        mock_process.side_effect = fake_process
+
+        files = {"file": ("test.wav", io.BytesIO(b"fake"), "audio/wav")}
+        data = {"with_speaker": "true", "include_srt": "true"}
+
+        response = client.post("/api/v1/transcribe", files=files, data=data)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert isinstance(result.get("srt"), str)
+        assert " --> " in result["srt"]
+        # SRT timestamps use comma as milliseconds separator.
+        assert "," in result["srt"]
+        assert "[说话人甲]" in result["srt"]
+
+
+def test_transcribe_all_models_includes_srt(client):
+    with patch('src.api.routes.transcribe.transcribe_all_models', new_callable=AsyncMock) as mock_all:
+        mock_all.return_value = {
+            "code": 0,
+            "base_backend": "pytorch",
+            "llm_used": True,
+            "llm_role": "policy_meeting",
+            "candidates": [],
+            "final": {
+                "code": 0,
+                "text": "你好",
+                "text_accu": None,
+                "sentences": [{"text": "你好", "start": 0, "end": 500, "speaker": "说话人甲", "speaker_id": 0}],
+                "speaker_turns": None,
+                "transcript": "[00:00 - 00:00] 说话人甲: 你好",
+                "raw_text": None,
+            },
+        }
+
+        files = {"file": ("test.wav", io.BytesIO(b"fake"), "audio/wav")}
+        response = client.post("/api/v1/transcribe/all", files=files)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert isinstance(body.get("final"), dict)
+        assert isinstance(body["final"].get("srt"), str)
+        assert " --> " in body["final"]["srt"]
+        assert "[说话人甲]" in body["final"]["srt"]
+
+
 def test_transcribe_asr_options_invalid_json(client):
     with patch('src.api.routes.transcribe.transcription_engine.transcribe_auto_async', new_callable=AsyncMock) as mock_transcribe_auto_async, \
          patch('src.api.routes.transcribe.process_audio_file') as mock_process:

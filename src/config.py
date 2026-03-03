@@ -116,11 +116,24 @@ class Settings(BaseSettings):
     # Notes:
     # - Older guides placed these files directly under data/models/.
     # - The GGUF backend includes runtime fallback resolution to support both layouts.
-    gguf_encoder_path: str = "models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx"
+    # GGUF is a CPU-oriented backend. Prefer the int8 encoder adaptor to avoid
+    # float16 CPU numerical issues (some fp16 exported graphs can output NaNs
+    # on CPU providers).
+    gguf_encoder_path: str = "models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-Encoder-Adaptor.int8.onnx"
     gguf_ctc_path: str = "models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-CTC.int8.onnx"
     gguf_decoder_path: str = "models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-Decoder.q8_0.gguf"
     gguf_tokens_path: str = "models/Fun-ASR-Nano-GGUF/tokens.txt"
     gguf_lib_dir: str = "models/bin"  # llama.cpp 库目录
+    # GGUF llama.cpp context configuration (prompt injection tokens limit).
+    # If you hit hard llama.cpp asserts like:
+    #   GGML_ASSERT(n_tokens_all <= cparams.n_batch)
+    # increase these values, or reduce chunk duration (VAD / diarizer max turn).
+    gguf_n_ctx: int = 2048
+    gguf_n_batch: int = 2048
+    # Some GGUF ONNX exports have shape assumptions that break on very short
+    # chunks (e.g. GatherND index out of range). Pad short audio up to this
+    # minimum sample count (16kHz mono) before running encoder/CTC.
+    gguf_min_samples: int = 96000  # ~= 6.0s @ 16kHz
 
     # Remote ASR 后端配置（自建 OpenAI-compatible server）
     # Qwen3-ASR: 优先 /v1/audio/transcriptions（Whisper 风格），部分部署才支持 /v1/chat/completions（audio_url）。
@@ -142,14 +155,18 @@ class Settings(BaseSettings):
     # Router 后端：根据音频时长/是否需要说话人自动选择后端
     router_long_audio_threshold_s: float = 60.0
     router_force_vibevoice_when_with_speaker: bool = True
-    router_short_backend: Literal["qwen3", "vibevoice"] = "qwen3"
-    router_long_backend: Literal["qwen3", "vibevoice"] = "vibevoice"
+    router_short_backend: Literal["qwen3", "vibevoice", "whisper"] = "qwen3"
+    router_long_backend: Literal["qwen3", "vibevoice", "whisper"] = "vibevoice"
 
     # Local Whisper backend (openai-whisper)
     whisper_model: str = "large"
     whisper_language: Optional[str] = "zh"
     # Set to a persistent directory (e.g. /app/data/models/whisper) to cache weights.
     whisper_download_root: str = ""
+    # Router-only: prefer proxying to an existing TingWu whisper service container
+    # (avoid loading weights twice).
+    whisper_service_base_url: str = ""
+    whisper_service_timeout_s: float = 600.0
 
     # 设备配置
     device: Literal["cuda", "cpu"] = "cuda"

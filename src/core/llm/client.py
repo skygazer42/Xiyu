@@ -244,7 +244,13 @@ class LLMClient:
         stream: bool
     ) -> AsyncGenerator[str, None]:
         """OpenAI 兼容 API 调用"""
-        url = f"{self.base_url}/v1/chat/completions"
+        # Be tolerant with base_url formats:
+        # - Some users configure `https://api.xxx.com` (no /v1)
+        # - Some configure `https://api.xxx.com/v1` (already includes /v1)
+        if self.base_url.endswith("/v1"):
+            url = f"{self.base_url}/chat/completions"
+        else:
+            url = f"{self.base_url}/v1/chat/completions"
 
         # 构建请求头
         headers = {"Content-Type": "application/json"}
@@ -295,7 +301,10 @@ class LLMClient:
         - 支持 PagedAttention
         - 高吞吐量场景优化
         """
-        url = f"{self.base_url}/v1/chat/completions"
+        if self.base_url.endswith("/v1"):
+            url = f"{self.base_url}/chat/completions"
+        else:
+            url = f"{self.base_url}/v1/chat/completions"
 
         # 构建请求头
         headers = {"Content-Type": "application/json"}

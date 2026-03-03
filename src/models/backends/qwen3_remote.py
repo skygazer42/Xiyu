@@ -271,7 +271,13 @@ def _extract_text_from_transcriptions(obj: object) -> str:
             text = obj.get("transcript")
         if text is None:
             text = obj.get("content")
-        return str(text or "").strip()
+        s = str(text or "").strip()
+        # Qwen3-ASR server variants may wrap the transcript like:
+        #   "language Chinese<asr_text>...."
+        tag = "<asr_text>"
+        if tag in s:
+            s = s.split(tag, 1)[1].strip()
+        return s
     return str(obj).strip()
 
 

@@ -1994,6 +1994,12 @@ class TranscriptionEngine:
         # Prepare backend once (avoid repeating per-chunk work).
         backend = model_manager.backend
         backend_name = backend.get_info().get("name", "unknown")
+        backend_type = str((backend.get_info() or {}).get("type") or "").strip().lower()
+        # llama.cpp-backed GGUF decoder is not thread-safe; concurrent chunk
+        # transcribe can crash the whole process. Force single worker.
+        if backend_type == "gguf" and max_workers != 1:
+            logger.info(f"GGUF backend detected; forcing chunking max_workers=1 (was {max_workers})")
+            max_workers = 1
 
         if with_speaker and not backend.supports_speaker:
             behavior = settings.speaker_unsupported_behavior_effective

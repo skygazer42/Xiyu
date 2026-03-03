@@ -29,9 +29,22 @@ def load_ctc_tokens(filename: str) -> Dict[int, str]:
     return id2token
 
 
-def decode_ctc(logits: np.ndarray, id2token: Dict[int, str]) -> Tuple[str, List[CTCToken]]:
-    """解码 CTC Logits 并计算时间戳"""
-    indices = np.argmax(logits[0], axis=-1)
+def decode_ctc(outputs: np.ndarray, id2token: Dict[int, str]) -> Tuple[str, List[CTCToken]]:
+    """解码 CTC 输出并计算时间戳。
+
+    Some exported CTC ONNX heads output per-frame logits with shape [1, T, V],
+    while others output already-argmaxed token indices with shape [1, T] (or [T]).
+    This helper supports both formats.
+    """
+    arr = np.asarray(outputs)
+    if arr.ndim == 3:
+        indices = np.argmax(arr[0], axis=-1)
+    elif arr.ndim == 2:
+        indices = arr[0]
+    elif arr.ndim == 1:
+        indices = arr
+    else:
+        raise ValueError(f"Unsupported CTC output shape: {arr.shape}")
     blank_id = max(id2token.keys()) if id2token else 0
 
     frame_shift_ms = 60

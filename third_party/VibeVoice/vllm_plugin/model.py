@@ -1004,17 +1004,43 @@ class VibeVoiceForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
         Returns:
             Tuple of embedding tensors, one per audio input.
         """
+        def _dummy_embedding(*, device: torch.device) -> torch.Tensor:
+            """Return a minimal placeholder embedding to satisfy vLLM's sanity check.
+
+            vLLM performs a multimodal profiling/sanity-check step on startup and
+            expects `embed_multimodal()` to return exactly one embedding per
+            input item. Some vLLM versions may call this method with
+            `raw_audio=None` or extremely short dummy inputs. Returning an empty
+            list/tuple causes the engine to abort with:
+              AssertionError: expected mm_embeddings=1 but got 0
+            """
+            # Prefer the LM dtype so downstream merge functions won't complain.
+            dtype = getattr(self.audio_encoder, "_lm_dtype", None) or torch.float16
+            try:
+                hidden = int(getattr(self.config, "hidden_size"))
+            except Exception:
+                hidden = 1536  # Safe fallback for Qwen2.5-7B.
+            return torch.zeros((1, hidden), device=device, dtype=dtype)
+
         # Get raw audio data (stored by our processor)
         raw_audio = kwargs.get("raw_audio")
         raw_audio_lengths = kwargs.get("raw_audio_lengths")
         
         # Handle no audio input - this happens during memory profiling
         if raw_audio is None:
-            return []
+            try:
+                device = next(self.audio_encoder.parameters()).device
+            except StopIteration:
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            return (_dummy_embedding(device=device),)
         
         # Handle empty audio list
         if isinstance(raw_audio, (list, tuple)) and len(raw_audio) == 0:
-            return []
+            try:
+                device = next(self.audio_encoder.parameters()).device
+            except StopIteration:
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            return (_dummy_embedding(device=device),)
         
         # Flatten raw_audio_lengths if it's nested
         def flatten_lengths(lengths):
@@ -1108,6 +1134,7 @@ class VibeVoiceForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                 
                 # Skip if audio is too short (< 1 frame)
                 if audio_tensor.numel() < 160:  # Minimum ~1ms at 24kHz
+                    embeddings.append(_dummy_embedding(device=device))
                     continue
                 
                 # Encode audio through VibeVoice encoder
@@ -1127,9 +1154,14 @@ class VibeVoiceForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                 print(f"[VibeVoice] Error encoding audio {i}: {e}")
                 import traceback
                 traceback.print_exc()
-                # Return empty embedding to avoid crash
+                # Keep length aligned with vLLM expectations (1 embedding per item).
+                embeddings.append(_dummy_embedding(device=device))
                 continue
         
+        if not embeddings:
+            # Never return empty, otherwise vLLM sanity-check may assert.
+            embeddings.append(_dummy_embedding(device=device))
+
         return tuple(embeddings)
 
     def get_input_embeddings(self) -> torch.nn.Module:

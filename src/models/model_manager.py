@@ -77,8 +77,8 @@ class ModelManager:
             elif backend_type == "router":
                 from src.models.backends.router import RouterBackend
 
-                short_backend = self._build_remote_backend(settings.router_short_backend)
-                long_backend = self._build_remote_backend(settings.router_long_backend)
+                short_backend = self._build_backend_for_router(settings.router_short_backend)
+                long_backend = self._build_backend_for_router(settings.router_long_backend)
                 self._backend = RouterBackend(
                     short_backend=short_backend,
                     long_backend=long_backend,
@@ -99,6 +99,41 @@ class ModelManager:
             logger.info(f"ASR backend initialized: {self._backend.get_info()}")
 
         return self._backend
+
+    @staticmethod
+    def _build_backend_for_router(backend_type: str) -> ASRBackend:
+        """Build a backend instance for RouterBackend.
+
+        Router may want to route to:
+        - remote ASR servers (qwen3/vibevoice)
+        - a local whisper model OR a proxied TingWu whisper service
+        """
+        bt = str(backend_type or "").strip().lower()
+
+        if bt in ("qwen3", "vibevoice"):
+            return ModelManager._build_remote_backend(bt)
+
+        if bt == "whisper":
+            base_url = str(getattr(settings, "whisper_service_base_url", "") or "").strip().rstrip("/")
+            if base_url:
+                from src.models.backends.tingwu_proxy import TingWuTranscribeProxyBackend
+
+                return TingWuTranscribeProxyBackend(
+                    base_url=base_url,
+                    timeout_s=float(getattr(settings, "whisper_service_timeout_s", 600.0) or 600.0),
+                    name="tingwu-whisper-proxy",
+                )
+
+            # Fallback: load Whisper weights locally in this process.
+            return get_backend(
+                backend_type="whisper",
+                model=settings.whisper_model,
+                device=settings.device,
+                language=settings.whisper_language,
+                download_root=settings.whisper_download_root,
+            )
+
+        raise ValueError(f"Unknown router backend type: {backend_type}")
 
     @staticmethod
     def _build_remote_backend(backend_type: str) -> ASRBackend:

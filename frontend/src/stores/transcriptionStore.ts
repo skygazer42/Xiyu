@@ -40,7 +40,7 @@ interface TranscriptionState {
 }
 
 const defaultOptions: TranscribeOptions = {
-  with_speaker: false,
+  with_speaker: true,
   apply_hotword: true,
   apply_llm: false,
   llm_role: 'default',

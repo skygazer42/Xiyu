@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Multi-model deployment: each model/backend runs as its own TingWu container,
 # exposing the same TingWu HTTP API on a different host port.
 #
@@ -31,6 +29,25 @@ x-tingwu-env: &tingwu-env
   <<: *proxy-env
   DEBUG: ${DEBUG:-false}
   HOTWORDS_THRESHOLD: ${HOTWORDS_THRESHOLD:-0.85}
+
+  # LLM (OpenAI-compatible / Ollama / vLLM). Values come from `.env` for
+  # multi-model deployments too; without passing these through, the container
+  # would fall back to defaults (e.g. localhost Ollama) and features like
+  # apply_llm / ensemble fusion won't work.
+  LLM_ENABLE: ${LLM_ENABLE:-false}
+  LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b}
+  LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:11434}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_BACKEND: ${LLM_BACKEND:-auto}
+  LLM_ROLE: ${LLM_ROLE:-default}
+  LLM_CONTEXT_SENTENCES: ${LLM_CONTEXT_SENTENCES:-1}
+  LLM_FULLTEXT_ENABLE: ${LLM_FULLTEXT_ENABLE:-false}
+  LLM_FULLTEXT_MAX_CHARS: ${LLM_FULLTEXT_MAX_CHARS:-2000}
+  LLM_BATCH_SIZE: ${LLM_BATCH_SIZE:-5}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
+  LLM_CACHE_ENABLE: ${LLM_CACHE_ENABLE:-true}
+  LLM_CACHE_SIZE: ${LLM_CACHE_SIZE:-1000}
+  LLM_CACHE_TTL: ${LLM_CACHE_TTL:-3600}
   # Speaker diarization is backend-specific. For per-port deployments we prefer
   # "ignore" so non-speaker backends still return a normal transcript.
   SPEAKER_UNSUPPORTED_BEHAVIOR: ${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
@@ -188,6 +205,10 @@ services:
       DEVICE: ${WHISPER_DEVICE:-cuda}
       NGPU: ${WHISPER_NGPU:-1}
       NCPU: ${WHISPER_NCPU:-4}
+      # Whisper's `initial_prompt` is best-effort and can sometimes get
+      # hallucinated into the transcript. Keep hotword correction enabled
+      # (apply_hotword), but disable forward-injection for this backend.
+      HOTWORD_INJECTION_ENABLE: "false"
       WHISPER_MODEL: ${WHISPER_MODEL:-large}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-zh}
       WHISPER_DOWNLOAD_ROOT: ${WHISPER_DOWNLOAD_ROOT:-/app/data/models/whisper}
@@ -227,9 +248,22 @@ services:
       DEVICE: ${GGUF_DEVICE:-cpu}
       NGPU: ${GGUF_NGPU:-0}
       NCPU: ${GGUF_NCPU:-8}
+      # GGUF backend injects audio embeddings into a GGUF decoder with a fixed
+      # context window; long chunks can trigger a hard llama.cpp assert and
+      # crash the whole process. Keep chunks short by default.
+      # Also increase llama.cpp n_ctx/n_batch so typical meeting chunks fit.
+      GGUF_N_CTX: ${GGUF_N_CTX:-8192}
+      GGUF_N_BATCH: ${GGUF_N_BATCH:-8192}
+      VAD_MAX_SEGMENT_MS: ${GGUF_VAD_MAX_SEGMENT_MS:-15000}
+      # GGUF backend does not support native diarization and is more fragile
+      # under many short chunks. Keep speaker off for this backend even if the
+      # global env enables external diarizer.
+      SPEAKER_EXTERNAL_DIARIZER_ENABLE: "false"
+      SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S: ${GGUF_SPEAKER_MAX_TURN_DURATION_S:-10}
       # Preferred layout: /app/data/models/Fun-ASR-Nano-GGUF/*
       # (Backwards compatible: the GGUF backend will also search /app/data/models/).
-      GGUF_ENCODER_PATH: ${GGUF_ENCODER_PATH:-/app/data/models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx}
+      # Prefer int8 encoder on CPU to avoid fp16 CPU NaNs on some kernels.
+      GGUF_ENCODER_PATH: ${GGUF_ENCODER_PATH:-/app/data/models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-Encoder-Adaptor.int8.onnx}
       GGUF_CTC_PATH: ${GGUF_CTC_PATH:-/app/data/models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-CTC.int8.onnx}
       GGUF_DECODER_PATH: ${GGUF_DECODER_PATH:-/app/data/models/Fun-ASR-Nano-GGUF/Fun-ASR-Nano-Decoder.q8_0.gguf}
       GGUF_TOKENS_PATH: ${GGUF_TOKENS_PATH:-/app/data/models/Fun-ASR-Nano-GGUF/tokens.txt}
@@ -293,7 +327,7 @@ services:
 
   vibevoice-asr:
     image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
-    profiles: ["vibevoice", "router"]
+    profiles: ["vibevoice", "router", "all"]
     container_name: vibevoice-asr
     ports:
       - "${PORT_VIBEVOICE_ASR:-9002}:8000"
@@ -369,7 +403,7 @@ services:
 
   tingwu-vibevoice:
     <<: *tingwu-base
-    profiles: ["vibevoice"]
+    profiles: ["vibevoice", "all"]
     container_name: tingwu-vibevoice
     ports:
       - "${PORT_TINGWU_VIBEVOICE:-8202}:8000"

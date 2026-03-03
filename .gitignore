@@ -36,6 +36,13 @@ data/uploads/*
 data/outputs/*
 data/models/*
 !data/hotwords/hotwords.txt
+data/_runs/
+data/_tmp/
+
+# Local audio artifacts (test/debug)
+*.m4a
+*.wav
+*.mp3
 
 # Docker
 *.log

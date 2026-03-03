@@ -33,6 +33,10 @@ class TranscribeResponse(BaseModel):
     sentences: List[SentenceInfo] = Field(default=[], description="分句信息")
     speaker_turns: Optional[List[SpeakerTurn]] = Field(default=None, description="说话人 turn/段落")
     transcript: Optional[str] = Field(default=None, description="格式化转写稿")
+    srt: Optional[str] = Field(
+        default=None,
+        description="SRT 字幕内容（可选，基于 sentences 或 speaker_turns 生成，包含说话人标签）",
+    )
     raw_text: Optional[str] = Field(default=None, description="原始文本 (未纠错)")
 
 
@@ -106,4 +110,29 @@ class BackendInfoResponse(BaseModel):
         ...,
         description="当 with_speaker=true 但后端不支持时的行为",
     )
+
+
+class EnsembleCandidate(BaseModel):
+    """多模型转写候选（用于全量/ensemble 接口）"""
+
+    backend: str = Field(..., description="候选后端名（pytorch/onnx/...）")
+    base_url: str = Field(..., description="候选后端 base url（容器内可用）")
+    success: bool = Field(default=True, description="是否成功")
+    http_status: Optional[int] = Field(default=None, description="HTTP 状态码（如可用）")
+    code: Optional[int] = Field(default=None, description="TingWu code 字段（如可用）")
+    elapsed_ms: Optional[int] = Field(default=None, description="耗时（毫秒）")
+    text: Optional[str] = Field(default=None, description="候选文本（可能截断）")
+    cleaned_text: Optional[str] = Field(default=None, description="用于 LLM 参考的清洗文本（可能截断）")
+    error: Optional[str] = Field(default=None, description="错误信息（失败时）")
+
+
+class EnsembleTranscribeResponse(BaseModel):
+    """多模型全量转写 + LLM 融合响应"""
+
+    code: int = Field(default=0, description="状态码 (0=成功)")
+    base_backend: str = Field(..., description="用作说话人骨架的后端（通常 pytorch）")
+    llm_used: bool = Field(default=True, description="是否实际调用了 LLM")
+    llm_role: str = Field(default="policy_meeting", description="LLM 角色")
+    candidates: List[EnsembleCandidate] = Field(default=[], description="各后端候选结果（用于对比/追踪）")
+    final: TranscribeResponse = Field(..., description="最终融合后的转写结果")
 

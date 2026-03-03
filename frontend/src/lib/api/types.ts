@@ -24,6 +24,8 @@ export interface TranscribeResponse {
   sentences: SentenceInfo[]
   speaker_turns?: SpeakerTurn[] | null
   transcript?: string
+  /** Backend-generated SRT content (optional). */
+  srt?: string | null
   raw_text?: string
 }
 
@@ -136,6 +138,28 @@ export interface BackendInfoResponse {
   speaker_unsupported_behavior: 'error' | 'fallback' | 'ignore'
 }
 
+// 全量/Ensemble 接口
+export interface EnsembleCandidate {
+  backend: string
+  base_url: string
+  success: boolean
+  http_status?: number | null
+  code?: number | null
+  elapsed_ms?: number | null
+  text?: string | null
+  cleaned_text?: string | null
+  error?: string | null
+}
+
+export interface EnsembleTranscribeResponse {
+  code: number
+  base_backend: string
+  llm_used: boolean
+  llm_role: string
+  candidates: EnsembleCandidate[]
+  final: TranscribeResponse
+}
+
 // 热词相关
 export interface HotwordsListResponse {
   code: number
@@ -172,7 +196,7 @@ export interface TranscribeOptions {
   with_speaker?: boolean
   apply_hotword?: boolean
   apply_llm?: boolean
-  llm_role?: 'default' | 'translator' | 'code' | 'corrector'
+  llm_role?: 'default' | 'translator' | 'code' | 'corrector' | 'meeting' | 'policy_meeting'
   hotwords?: string
   speaker_label_style?: 'numeric' | 'zh'
 }

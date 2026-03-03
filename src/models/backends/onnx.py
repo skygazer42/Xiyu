@@ -216,74 +216,66 @@ class ONNXBackend(ASRBackend):
         if hotwords:
             logger.debug("ONNX backend: hotwords will be processed via post-processing pipeline")
 
-        # NOTE: funasr-onnx Paraformer is most stable when called with an *audio file path*
-        # (see scripts/benchmark_asr.py usage). TingWu HTTP endpoints provide PCM16LE bytes,
-        # so we materialize a temporary WAV file when needed.
-        wav_path: Optional[str] = None
-        created_tmp_wav = False
+        # IMPORTANT:
+        # funasr-onnx Paraformer loads WAV paths via `librosa.load()`, which pulls in
+        # scipy.interpolate/fitpack. In some minimal Docker images this import can
+        # fail with a RecursionError. TingWu already provides 16kHz mono PCM16LE
+        # bytes, so we bypass path loading completely by passing a waveform array.
+        import numpy as np
+
+        from src.core.audio.pcm import (
+            is_wav_bytes,
+            wav_bytes_to_float32,
+        )
+
+        def _resample_linear(x: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
+            """Best-effort linear resample without scipy/librosa dependencies."""
+            if orig_sr <= 0 or target_sr <= 0:
+                raise ValueError(f"invalid sample rates: orig_sr={orig_sr} target_sr={target_sr}")
+            if orig_sr == target_sr:
+                return x.astype(np.float32, copy=False)
+            if x.size == 0:
+                return x.astype(np.float32, copy=False)
+            # Use float64 for indices for stability, but output float32.
+            ratio = float(target_sr) / float(orig_sr)
+            n_out = max(1, int(round(x.size * ratio)))
+            src_idx = np.linspace(0.0, float(x.size - 1), num=n_out, dtype=np.float64)
+            x64 = x.astype(np.float64, copy=False)
+            out = np.interp(src_idx, np.arange(x.size, dtype=np.float64), x64)
+            return out.astype(np.float32, copy=False)
+
         if isinstance(audio_input, (str, Path)):
-            wav_path = str(audio_input)
-        else:
-            import tempfile
-            import numpy as np
-
-            from src.core.audio.pcm import (
-                is_wav_bytes,
-                float32_to_pcm16le_bytes,
-                wav_bytes_to_float32,
-            )
-            from src.models.backends.remote_utils import pcm16le_to_wav_bytes
-
-            wav_bytes: bytes
-
-            if isinstance(audio_input, (bytes, bytearray)):
-                data = bytes(audio_input)
-                if is_wav_bytes(data):
-                    # Normalize to 16k mono PCM16 WAV for consistency.
-                    audio_f32, sr = wav_bytes_to_float32(data)
-                    if sr != 16000:
-                        try:
-                            import librosa
-
-                            audio_f32 = librosa.resample(audio_f32, orig_sr=sr, target_sr=16000)
-                        except Exception as e:
-                            raise ValueError(
-                                f"Unsupported WAV sample_rate={sr}, expected 16000"
-                            ) from e
-                    pcm = float32_to_pcm16le_bytes(audio_f32)
-                else:
-                    # Raw PCM16LE 16k mono.
-                    pcm = data
-                    if len(pcm) % 2 != 0:
-                        pcm = pcm[: len(pcm) - 1]
-                wav_bytes = pcm16le_to_wav_bytes(pcm, sample_rate=16000, channels=1, sampwidth=2)
-            elif isinstance(audio_input, np.ndarray):
-                a = audio_input.astype(np.float32, copy=False)
-                pcm = float32_to_pcm16le_bytes(a)
-                wav_bytes = pcm16le_to_wav_bytes(pcm, sample_rate=16000, channels=1, sampwidth=2)
+            # Path inputs are not used by the HTTP API, but keep a small,
+            # dependency-light fallback for local usage: only support WAV.
+            p = Path(audio_input)
+            data = p.read_bytes()
+            if not is_wav_bytes(data):
+                raise ValueError("ONNX backend only supports WAV path inputs (non-WAV requires ffmpeg preprocessing)")
+            audio_f32, sr = wav_bytes_to_float32(data)
+            if sr != 16000:
+                audio_f32 = _resample_linear(audio_f32, sr, 16000)
+            waveform = audio_f32
+        elif isinstance(audio_input, (bytes, bytearray)):
+            data = bytes(audio_input)
+            if is_wav_bytes(data):
+                audio_f32, sr = wav_bytes_to_float32(data)
+                if sr != 16000:
+                    audio_f32 = _resample_linear(audio_f32, sr, 16000)
+                waveform = audio_f32
             else:
-                raise ValueError(f"Unsupported audio input type for ONNX backend: {type(audio_input)}")
-
-            settings.uploads_dir.mkdir(parents=True, exist_ok=True)
-            tmp = tempfile.NamedTemporaryFile(
-                mode="wb",
-                suffix=".wav",
-                dir=str(settings.uploads_dir),
-                delete=False,
-            )
-            tmp.write(wav_bytes)
-            tmp.flush()
-            tmp.close()
-            wav_path = tmp.name
-            created_tmp_wav = True
+                # TingWu internal: raw PCM16LE 16kHz mono
+                pcm = data
+                if len(pcm) % 2 != 0:
+                    pcm = pcm[: len(pcm) - 1]
+                waveform = (np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0)
+        elif isinstance(audio_input, np.ndarray):
+            waveform = audio_input.astype(np.float32, copy=False)
+        else:
+            raise ValueError(f"Unsupported audio input type for ONNX backend: {type(audio_input)}")
 
         try:
-            # 直接对完整音频进行 ASR
-            # funasr_onnx Paraformer 最稳定的调用方式是传入 path list
-            # (see funasr-onnx examples). Single-string inputs sometimes behave
-            # differently across versions.
-            # 返回: [{'preds': ('text', [chars])}]
-            asr_result = self._model([wav_path])
+            # 直接对完整音频进行 ASR（传入 waveform 可避免 librosa/scipy 依赖链）
+            asr_result = self._model(waveform)
 
             if not asr_result or len(asr_result) == 0:
                 return {"text": "", "sentence_info": []}
@@ -323,14 +315,8 @@ class ONNXBackend(ASRBackend):
             logger.error(f"ONNX transcription failed: {e}")
             raise
         finally:
-            if created_tmp_wav and wav_path:
-                try:
-                    import os
-
-                    if os.path.exists(wav_path):
-                        os.unlink(wav_path)
-                except Exception:
-                    pass
+            # No temp files when using waveform inputs.
+            pass
 
     def transcribe_streaming(
         self,

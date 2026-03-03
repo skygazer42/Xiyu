@@ -48,6 +48,7 @@
 > | `docker-compose.cpu.yml` | 同上，纯 CPU | 没有 GPU 的机器 |
 > | `docker-compose.sensevoice.yml` | 同上，SenseVoice 后端 | 需要多语言 |
 > | `docker-compose.onnx.yml` | 同上，ONNX INT8 后端 | 轻量/低延迟 |
+> | `docker-compose.benchmark.yml` | 基准测试容器：跑一组音频/模型对比并输出结果 | 性能评估、RTF 对比 |
 > | `docker-compose.models.yml` | **多模型按需启动**：每个后端一个容器，按 profile 选择 | 生产/A-B 对比/多后端并存 |
 > | `docker-compose.remote-asr.yml` | 远程 ASR (Qwen3 + VibeVoice) + TingWu router | 大模型 ASR 部署 |
 >
@@ -216,8 +217,8 @@ docker compose -f docker-compose.models.yml \
 如果你已经准备好了 GGUF 模型文件（`./data/models/` 下的 encoder/ctc/decoder/tokens），再用 `all` profile：
 
 ```bash
-# 包含：diarizer + pytorch + onnx + sensevoice + gguf + whisper + qwen3
-# 不包含：vibevoice/router（可选；默认使用 ./third_party/VibeVoice，无需手动 clone）
+# 包含：diarizer + pytorch + onnx + sensevoice + gguf + whisper + qwen3 + vibevoice
+# 不包含：router（可选；如需 Router 自动选模型可再启用 --profile router）
 docker compose -f docker-compose.models.yml --profile all up -d
 ```
 
@@ -254,6 +255,40 @@ docker compose -f docker-compose.models.yml down
     - `SPEAKER_FALLBACK_DIARIZATION_ENABLE=true`
     - `SPEAKER_FALLBACK_DIARIZATION_BASE_URL=http://tingwu-pytorch:8000`
   - 如果辅助服务不可用，会自动回退为普通转写（不会报错）。
+
+##### 部署验收（接口自检 / Smoke Test）
+
+多容器部署完成后，建议跑一次“全接口/全后端”的自检，确认每个端口都能正常响应。
+
+1) 健康检查（任选一个端口即可）：
+
+```bash
+curl -sS http://localhost:8101/health
+```
+
+2) 全后端转写自检（会分别请求每个端口的 `/api/v1/transcribe`，并额外请求一次全量融合接口 `/api/v1/transcribe/all`）：
+
+```bash
+# 建议用一段 10~60s 的小音频做 smoke test
+bash scripts/test_all_models.sh clip_30s.m4a data/outputs/smoke_$(date +%Y%m%d_%H%M%S)
+```
+
+说明：
+- 输出会落到 `data/outputs/.../*.json`（默认已在 `.gitignore` 里忽略）。
+- 如果你没启用 LLM（`.env` 中 `LLM_ENABLE=false`），`/transcribe/all` 仍会返回结果，但 `llm_used=false`（仅做多模型候选对比，不做融合润色）。
+
+3) 全量融合接口（多模型 + LLM，可选）
+
+该接口用于“政策/政务会议”场景：并发跑多个后端，把候选结果交给 LLM 参考，输出最终听记稿（返回 `candidates + final`）。
+
+```bash
+curl -X POST "http://localhost:8101/api/v1/transcribe/all" \
+  -F "file=@clip_30s.m4a" \
+  -F "with_speaker=true" \
+  -F "apply_hotword=true" \
+  -F "apply_llm=true" \
+  -F "llm_role=policy_meeting"
+```
 
 #### 不用 Docker：直接 Python 启动（本地/裸机）
 
@@ -503,6 +538,18 @@ npm run dev
 如果你希望把模型推理放到独立服务（本地/内网），TingWu 支持通过 vLLM 的 OpenAI 兼容接口接入 **Qwen3-ASR** 和 **VibeVoice-ASR**。
 
 > 模型权重默认从 [ModelScope](https://modelscope.cn) 下载（国内网络友好）。如需切换到 HuggingFace，设置 `MODEL_SOURCE=huggingface`。
+
+如果你希望“一条命令”把 Qwen3 + VibeVoice + Router 都跑起来（不用手动 `pip install qwen-asr`），可以直接使用：
+
+```bash
+cp .env.example .env
+
+# 启动：Qwen3-ASR + VibeVoice-ASR + TingWu(router) -> http://localhost:8000
+docker compose -f docker-compose.remote-asr.yml up -d --build
+
+# 可选：加上 external diarizer（pyannote），让 Router 也能输出 speaker_turns
+docker compose -f docker-compose.remote-asr.yml --profile diarizer up -d --build
+```
 
 1) 启动 Qwen3-ASR（自动从 ModelScope 下载权重）
 

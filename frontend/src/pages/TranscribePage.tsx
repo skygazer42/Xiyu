@@ -6,15 +6,15 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2, Play, FileAudio, Link } from 'lucide-react'
 import { FileDropzone } from '@/components/upload'
 import { TranscribeOptions } from '@/components/transcribe'
-import { TranscriptView } from '@/components/transcript'
+import { EnsemblePanel, TranscriptView } from '@/components/transcript'
 import { Timeline } from '@/components/timeline'
 import { HistoryList } from '@/components/history/HistoryList'
 import { UrlTranscribe } from '@/components/url/UrlTranscribe'
 import { TaskManager, type Task } from '@/components/task/TaskManager'
 import { useTranscriptionStore } from '@/stores'
 import { useHistoryStore, type HistoryItem } from '@/stores/historyStore'
-import { getApiBaseUrl, getTaskResult, transcribeAudio, transcribeBatch, transcribeUrl } from '@/lib/api'
-import type { SentenceInfo, TranscribeResponse } from '@/lib/api/types'
+import { getApiBaseUrl, getTaskResult, transcribeAudio, transcribeAllModels, transcribeBatch, transcribeUrl } from '@/lib/api'
+import type { EnsembleTranscribeResponse, SentenceInfo, TranscribeResponse } from '@/lib/api/types'
 
 type UrlTask = Task & {
   backendBaseUrl: string
@@ -45,6 +45,7 @@ export default function TranscribePage() {
   const [urlTasks, setUrlTasks] = useState<UrlTask[]>([])
   const [isSubmittingUrl, setIsSubmittingUrl] = useState(false)
   const [resultFilename, setResultFilename] = useState<string | undefined>()
+  const [ensembleResult, setEnsembleResult] = useState<EnsembleTranscribeResponse | null>(null)
 
   const urlPollingTimersRef = useRef<Record<string, number>>({})
   const urlPollingStartedAtRef = useRef<Record<string, number>>({})
@@ -184,6 +185,7 @@ export default function TranscribePage() {
     }
 
     setTranscribing(true)
+    setEnsembleResult(null)
     setResult(null)
     setResultFilename(undefined)
 
@@ -260,6 +262,65 @@ export default function TranscribePage() {
     }
   }
 
+  const handleTranscribeAllModels = async () => {
+    if (files.length === 0) {
+      toast.error('请先上传音频文件')
+      return
+    }
+    if (files.length !== 1) {
+      toast.error('全量模式目前仅支持单文件')
+      return
+    }
+
+    if (advancedAsrOptionsError) {
+      toast.error(`高级 asr_options JSON 无效：${advancedAsrOptionsError}`)
+      return
+    }
+
+    setTranscribing(true)
+    setEnsembleResult(null)
+    setResult(null)
+    setResultFilename(undefined)
+
+    try {
+      const transcribeOptions = {
+        ...options,
+        apply_llm: true,
+        // Default to the policy role for this button unless user explicitly chose another.
+        llm_role: options.llm_role && options.llm_role !== 'default' ? options.llm_role : 'policy_meeting',
+        hotwords: tempHotwords || undefined,
+        asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
+      }
+
+      const response = await transcribeAllModels(files[0], transcribeOptions)
+      if (response.code === 0) {
+        setEnsembleResult(response)
+        setResult(response.final)
+        setResultFilename(files[0].name.replace(/\.[^/.]+$/, ''))
+        addItem({
+          filename: files[0].name,
+          text: response.final.text,
+          sentences: response.final.sentences,
+          rawText: response.final.raw_text,
+          options: {
+            withSpeaker: options.with_speaker,
+            applyHotword: options.apply_hotword,
+            applyLlm: true,
+            llmRole: transcribeOptions.llm_role,
+          },
+        })
+        toast.success('全量融合完成')
+      } else {
+        toast.error('全量融合失败')
+      }
+    } catch (error) {
+      console.error('Ensemble transcription error:', error)
+      toast.error('全量转写请求失败，请检查服务连接')
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
   const urlTranscribeOptions = useMemo(() => {
     return {
       ...options,
@@ -313,6 +374,7 @@ export default function TranscribePage() {
       return
     }
 
+    setEnsembleResult(null)
     setResult(task.result)
     setResultFilename((task.filename || task.id).replace(/\.[^/.]+$/, ''))
     setSelectedSentence(null)
@@ -366,6 +428,7 @@ export default function TranscribePage() {
 
   const handleClear = () => {
     clearFiles()
+    setEnsembleResult(null)
     setResult(null)
     setResultFilename(undefined)
     setSelectedSentence(null)
@@ -373,6 +436,7 @@ export default function TranscribePage() {
   }
 
   const handleViewHistoryItem = (item: HistoryItem) => {
+    setEnsembleResult(null)
     setResult({
       code: 0,
       text: item.text,
@@ -429,6 +493,14 @@ export default function TranscribePage() {
                       </>
                     )}
                   </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={handleTranscribeAllModels}
+                    disabled={files.length !== 1 || isTranscribing}
+                    title="同时跑全部模型并做 LLM 融合润色（耗时更长）"
+                  >
+                    全量优化
+                  </Button>
                   {files.length > 0 && !isTranscribing && (
                     <Button variant="outline" onClick={handleClear}>
                       清空
@@ -477,6 +549,11 @@ export default function TranscribePage() {
       )}
 
       {/* 转写结果 */}
+      {/* 多模型候选（仅当使用“全量优化”接口时展示） */}
+      {result && ensembleResult && (
+        <EnsemblePanel ensemble={ensembleResult} />
+      )}
+
       {result && (
         <TranscriptView
           result={result}
