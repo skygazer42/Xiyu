@@ -88,7 +88,7 @@ function HistoryList({
   }
 
   const handleExport = (item: HistoryItem) => {
-    const content = item.text
+    const content = item.transcript || item.textAccu || item.text
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -194,7 +194,7 @@ function HistoryList({
                   <CollapsibleContent>
                     <div className="border-t px-3 py-3 bg-muted/30 space-y-3">
                       <div className="text-sm whitespace-pre-wrap max-h-[200px] overflow-y-auto">
-                        {item.text}
+                        {item.transcript || item.textAccu || item.text}
                       </div>
                       <div className="flex items-center gap-2">
                         {onViewResult && (

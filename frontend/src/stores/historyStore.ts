@@ -6,7 +6,11 @@ export interface HistoryItem {
   id: string
   filename: string
   text: string
+  textAccu?: string | null
   sentences: TranscribeResponse['sentences']
+  speakerTurns?: TranscribeResponse['speaker_turns']
+  transcript?: string
+  srt?: string | null
   rawText?: string
   timestamp: number
   duration?: number

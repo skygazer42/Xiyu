@@ -262,7 +262,11 @@ export default function TranscribePage() {
           addItem({
             filename: files[0].name,
             text: response.text,
+            textAccu: response.text_accu ?? undefined,
             sentences: response.sentences,
+            speakerTurns: response.speaker_turns ?? undefined,
+            transcript: response.transcript ?? undefined,
+            srt: response.srt ?? undefined,
             rawText: response.raw_text,
             options: {
               withSpeaker: options.with_speaker,
@@ -303,12 +307,17 @@ export default function TranscribePage() {
               addItem({
                 filename: files[idx]?.name ?? `文件${idx + 1}`,
                 text: r.result.text,
+                textAccu: r.result.text_accu ?? undefined,
                 sentences: r.result.sentences,
+                speakerTurns: r.result.speaker_turns ?? undefined,
+                transcript: r.result.transcript ?? undefined,
+                srt: r.result.srt ?? undefined,
                 rawText: r.result.raw_text,
                 options: {
                   withSpeaker: options.with_speaker,
                   applyHotword: options.apply_hotword,
                   applyLlm: options.apply_llm,
+                  llmRole: options.llm_role,
                 },
               })
             }
@@ -397,7 +406,11 @@ export default function TranscribePage() {
         addItem({
           filename: files[0].name,
           text: response.final.text,
+          textAccu: response.final.text_accu ?? undefined,
           sentences: response.final.sentences,
+          speakerTurns: response.final.speaker_turns ?? undefined,
+          transcript: response.final.transcript ?? undefined,
+          srt: response.final.srt ?? undefined,
           rawText: response.final.raw_text,
           options: {
             withSpeaker: options.with_speaker,
@@ -492,7 +505,11 @@ export default function TranscribePage() {
       addItem({
         filename: task.filename || task.id,
         text: task.result.text,
+        textAccu: task.result.text_accu ?? undefined,
         sentences: task.result.sentences,
+        speakerTurns: task.result.speaker_turns ?? undefined,
+        transcript: task.result.transcript ?? undefined,
+        srt: task.result.srt ?? undefined,
         rawText: task.result.raw_text,
         options: {
           withSpeaker: options.with_speaker,
@@ -548,7 +565,11 @@ export default function TranscribePage() {
     setResult({
       code: 0,
       text: item.text,
+      text_accu: item.textAccu ?? null,
       sentences: item.sentences,
+      speaker_turns: item.speakerTurns ?? null,
+      transcript: item.transcript,
+      srt: item.srt ?? null,
       raw_text: item.rawText,
     })
     setResultFilename(item.filename.replace(/\.[^/.]+$/, ''))
