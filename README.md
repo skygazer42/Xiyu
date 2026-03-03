@@ -66,6 +66,15 @@ docker compose up -d
 
 访问 **http://localhost:8000** 即可使用。
 
+如果需要 **内网其它电脑访问**，把 `localhost` 换成你的服务器内网 IP，例如：
+
+- `http://10.168.2.227:8000`
+
+并确认三点：
+- 服务绑定 `0.0.0.0`（本项目默认 `HOST=0.0.0.0`）
+- Docker 端口映射对外（compose 里是 `0.0.0.0:8000->8000`）
+- 服务器防火墙/安全组已放行该端口
+
 > **首次启动说明**：首次运行时会自动从 ModelScope 下载 ASR 模型（约 1-2GB），请耐心等待。模型会缓存到 Docker Volume 中，后续启动无需重新下载。
 
 其他单模型变体：
@@ -87,6 +96,11 @@ docker compose up -d
 - 按 profile 按需启动，不用的后端不占资源
 - 每个后端一个独立端口，方便 A/B 对比和基准测试
 - 支持 Qwen3-ASR、VibeVoice-ASR、Router 等远程模型后端
+
+内网部署建议（只对外开放 1 个入口）：
+- 只暴露 `tingwu-router` 的端口（默认 `8200`，同时提供 **Web UI + API**）
+- 其它 `810x/820x/8300/900x` 端口只给 Docker 内部互通即可（不需要公司网段直连）
+- 前端里选择「当前服务 (相对路径)」，即可把请求统一打到 router
 
 
 （按需启动）：
@@ -270,11 +284,12 @@ curl -sS http://localhost:8101/health
 
 ```bash
 # 建议用一段 10~60s 的小音频做 smoke test
-bash scripts/test_all_models.sh clip_30s.m4a data/outputs/smoke_$(date +%Y%m%d_%H%M%S)
+bash scripts/smoke_test.sh clip_30s.m4a data/outputs/smoke_$(date +%Y%m%d_%H%M%S)
 ```
 
 说明：
 - 输出会落到 `data/outputs/.../*.json`（默认已在 `.gitignore` 里忽略）。
+- `scripts/smoke_test.sh` 会自动跳过未启动/不可达的端口（例如你没有启用 GGUF/Whisper）。
 - 如果你没启用 LLM（`.env` 中 `LLM_ENABLE=false`），`/transcribe/all` 仍会返回结果，但 `llm_used=false`（仅做多模型候选对比，不做融合润色）。
 
 3) 全量融合接口（多模型 + LLM，可选）
@@ -294,6 +309,14 @@ curl -X POST "http://localhost:8101/api/v1/transcribe/all" \
 # - policy_meeting_v2（平衡）
 # - policy_meeting_aggressive（激进）
 ```
+
+> **注意：LLM 有两种用法（别搞混）**
+>
+> 1) **单模型润色**（影响 `/api/v1/transcribe`、`/api/v1/transcribe/batch`、URL 转写）  
+>    推荐角色：`policy_polish_strict` / `policy_polish_balanced` / `policy_polish_aggressive`
+>
+> 2) **全量多模型融合**（只影响 `/api/v1/transcribe/all`）  
+>    推荐角色：`policy_meeting` / `policy_meeting_v2` / `policy_meeting_aggressive`
 
 #### 不用 Docker：直接 Python 启动（本地/裸机）
 
