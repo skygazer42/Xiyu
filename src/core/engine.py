@@ -587,9 +587,7 @@ class TranscriptionEngine:
         # 获取纠错历史上下文
         rectify_context = None
         if self._rectify_loaded:
-            results = self.rectification_rag.search(text, top_k=3)
-            if results:
-                rectify_context = self.rectification_rag.format_prompt(results)
+            rectify_context = self.rectification_rag.format_prompt(text, top_k=3)
 
         # 构建消息
         messages = prompt_builder.build(
@@ -650,9 +648,7 @@ class TranscriptionEngine:
         # 获取纠错历史上下文
         rectify_context = None
         if self._rectify_loaded:
-            results = self.rectification_rag.search(text[:200], top_k=5)
-            if results:
-                rectify_context = self.rectification_rag.format_prompt(results)
+            rectify_context = self.rectification_rag.format_prompt(text[:200], top_k=5)
 
         # 构建消息
         messages = prompt_builder.build(
