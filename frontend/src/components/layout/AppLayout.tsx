@@ -16,13 +16,13 @@ export function AppLayout() {
       <Sidebar />
 
       {/* 主内容区 */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden min-h-0">
         {/* 顶部导航 */}
         <Navbar />
 
         {/* 页面内容 */}
         <main id="main-content" className="flex-1 min-h-0 overflow-y-auto">
-          <div className="container mx-auto py-6 px-4 md:px-6 pb-20 md:pb-6">
+          <div className="container mx-auto py-6 px-4 md:px-6 pb-24 md:pb-6">
             <Outlet />
           </div>
         </main>

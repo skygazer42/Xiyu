@@ -3,6 +3,8 @@ import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Progress } from '@/components/ui/progress'
+import { CircularProgressIndeterminate } from '@/components/ui/circular-progress'
 import { Loader2, Play, FileAudio, Link } from 'lucide-react'
 import { FileDropzone } from '@/components/upload'
 import { TranscribeOptions } from '@/components/transcribe'
@@ -14,6 +16,7 @@ import { TaskManager, type Task } from '@/components/task/TaskManager'
 import { useTranscriptionStore } from '@/stores'
 import { useHistoryStore, type HistoryItem } from '@/stores/historyStore'
 import { getApiBaseUrl, getTaskResult, transcribeAudio, transcribeAllModels, transcribeBatch, transcribeUrl } from '@/lib/api'
+import { fromAxiosError, getUserFriendlyMessage } from '@/lib/errors'
 import type { EnsembleTranscribeResponse, SentenceInfo, TranscribeResponse } from '@/lib/api/types'
 
 type UrlTask = Task & {
@@ -46,9 +49,45 @@ export default function TranscribePage() {
   const [isSubmittingUrl, setIsSubmittingUrl] = useState(false)
   const [resultFilename, setResultFilename] = useState<string | undefined>()
   const [ensembleResult, setEnsembleResult] = useState<EnsembleTranscribeResponse | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [transcribePhase, setTranscribePhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
+  const [elapsedMs, setElapsedMs] = useState(0)
 
   const urlPollingTimersRef = useRef<Record<string, number>>({})
   const urlPollingStartedAtRef = useRef<Record<string, number>>({})
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const transcribeStartedAtRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!isTranscribing) {
+      setElapsedMs(0)
+      return
+    }
+
+    const timerId = window.setInterval(() => {
+      const startedAt = transcribeStartedAtRef.current
+      if (!startedAt) return
+      setElapsedMs(Date.now() - startedAt)
+    }, 500)
+
+    return () => window.clearInterval(timerId)
+  }, [isTranscribing])
+
+  const resetTranscribeUiState = useCallback(() => {
+    setUploadProgress(null)
+    setTranscribePhase('idle')
+    setElapsedMs(0)
+    transcribeStartedAtRef.current = null
+    abortControllerRef.current = null
+  }, [])
+
+  const handleCancel = useCallback(() => {
+    const controller = abortControllerRef.current
+    if (!controller) return
+    controller.abort()
+    resetTranscribeUiState()
+    setTranscribing(false)
+  }, [resetTranscribeUiState, setTranscribing])
 
   const stopUrlPolling = useCallback((taskId: string) => {
     const timerId = urlPollingTimersRef.current[taskId]
@@ -185,6 +224,10 @@ export default function TranscribePage() {
     }
 
     setTranscribing(true)
+    transcribeStartedAtRef.current = Date.now()
+    abortControllerRef.current = new AbortController()
+    setUploadProgress(0)
+    setTranscribePhase('uploading')
     setEnsembleResult(null)
     setResult(null)
     setResultFilename(undefined)
@@ -198,7 +241,19 @@ export default function TranscribePage() {
 
       if (files.length === 1) {
         // 单文件转写
-        const response = await transcribeAudio(files[0], transcribeOptions)
+        const response = await transcribeAudio(files[0], {
+          ...transcribeOptions,
+          signal: abortControllerRef.current?.signal,
+          onUploadProgress: (progress) => {
+            const p = Math.max(0, Math.min(100, progress))
+            if (p >= 99) {
+              setUploadProgress(null)
+              setTranscribePhase('processing')
+              return
+            }
+            setUploadProgress(p)
+          },
+        })
         if (response.code === 0) {
           setResult(response)
           setResultFilename(files[0].name.replace(/\.[^/.]+$/, ''))
@@ -221,7 +276,19 @@ export default function TranscribePage() {
         }
       } else {
         // 批量转写
-        const response = await transcribeBatch(files, transcribeOptions)
+        const response = await transcribeBatch(files, {
+          ...transcribeOptions,
+          signal: abortControllerRef.current?.signal,
+          onUploadProgress: (progress) => {
+            const p = Math.max(0, Math.min(100, progress))
+            if (p >= 99) {
+              setUploadProgress(null)
+              setTranscribePhase('processing')
+              return
+            }
+            setUploadProgress(p)
+          },
+        })
         if (response.success_count > 0) {
           // 显示第一个成功的结果
           const firstSuccess = response.results.find(r => r.success && r.result)
@@ -252,13 +319,24 @@ export default function TranscribePage() {
       }
     } catch (error) {
       console.error('Transcription error:', error)
+      const isCanceled =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error as { code?: string }).code === 'ERR_CANCELED'
+      if (isCanceled) {
+        toast.message('已取消')
+        return
+      }
       if (error instanceof Error && error.message.includes('asr_options')) {
         toast.error(error.message)
       } else {
-        toast.error('转写请求失败，请检查服务连接')
+        const appError = fromAxiosError(error)
+        toast.error(getUserFriendlyMessage(appError))
       }
     } finally {
       setTranscribing(false)
+      resetTranscribeUiState()
     }
   }
 
@@ -278,6 +356,10 @@ export default function TranscribePage() {
     }
 
     setTranscribing(true)
+    transcribeStartedAtRef.current = Date.now()
+    abortControllerRef.current = new AbortController()
+    setUploadProgress(0)
+    setTranscribePhase('uploading')
     setEnsembleResult(null)
     setResult(null)
     setResultFilename(undefined)
@@ -292,7 +374,19 @@ export default function TranscribePage() {
         asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
       }
 
-      const response = await transcribeAllModels(files[0], transcribeOptions)
+      const response = await transcribeAllModels(files[0], {
+        ...transcribeOptions,
+        signal: abortControllerRef.current?.signal,
+        onUploadProgress: (progress) => {
+          const p = Math.max(0, Math.min(100, progress))
+          if (p >= 99) {
+            setUploadProgress(null)
+            setTranscribePhase('processing')
+            return
+          }
+          setUploadProgress(p)
+        },
+      })
       if (response.code === 0) {
         setEnsembleResult(response)
         setResult(response.final)
@@ -315,9 +409,20 @@ export default function TranscribePage() {
       }
     } catch (error) {
       console.error('Ensemble transcription error:', error)
-      toast.error('全量转写请求失败，请检查服务连接')
+      const isCanceled =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error as { code?: string }).code === 'ERR_CANCELED'
+      if (isCanceled) {
+        toast.message('已取消')
+        return
+      }
+      const appError = fromAxiosError(error)
+      toast.error(getUserFriendlyMessage(appError))
     } finally {
       setTranscribing(false)
+      resetTranscribeUiState()
     }
   }
 
@@ -501,12 +606,44 @@ export default function TranscribePage() {
                   >
                     全量优化
                   </Button>
+                  {isTranscribing && (
+                    <Button variant="outline" onClick={handleCancel} title="取消当前请求（不会影响服务端已在跑的推理）">
+                      取消
+                    </Button>
+                  )}
                   {files.length > 0 && !isTranscribing && (
                     <Button variant="outline" onClick={handleClear}>
                       清空
                     </Button>
                   )}
                 </div>
+
+                {isTranscribing && (
+                  <div className="rounded-md border bg-muted/20 p-3">
+                    {transcribePhase === 'uploading' && uploadProgress !== null ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>上传中...</span>
+                          <span className="tabular-nums">{uploadProgress}%</span>
+                        </div>
+                        <Progress value={uploadProgress} />
+                        <p className="text-xs text-muted-foreground">
+                          上传完成后会进入推理阶段；全量优化可能需要几分钟。
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-3">
+                        <CircularProgressIndeterminate size="sm" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">处理中...</p>
+                          <p className="text-xs text-muted-foreground">
+                            全量优化会并发调用多个模型 + LLM 融合润色（已用时 {formatElapsed(elapsedMs)}）
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <div className="space-y-4">
@@ -576,4 +713,11 @@ export default function TranscribePage() {
       <HistoryList onViewResult={handleViewHistoryItem} />
     </div>
   )
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
 }

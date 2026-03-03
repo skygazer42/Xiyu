@@ -173,6 +173,9 @@ export async function transcribeAllModels(
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      // This endpoint fans out to multiple backends + optional LLM fusion, so
+      // it can take much longer than a single-model /transcribe call.
+      timeout: 10 * 60 * 1000,
       signal,
       onUploadProgress: onUploadProgress
         ? (progressEvent) => {
