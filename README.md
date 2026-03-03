@@ -235,7 +235,7 @@ docker compose -f docker-compose.models.yml down
 ```
 
 提示：
-- 打开任意一个 TingWu 容器的前端页面后，可在「转写选项 → 后端」里切换 `Base URL`（例如 `http://localhost:8101` / `8102` / `8201`），前端会把请求发到你选择的端口。
+- 打开任意一个 TingWu 容器的前端页面后，可在「转写选项 → 后端」里切换 `Base URL`（例如 `http://<server-host>:8101` / `8102` / `8201`），前端会把请求发到你选择的端口（预设会自动使用当前页面的域名/IP，不再固定 `localhost`）。
 - Whisper 容器默认使用 `WHISPER_MODEL=large`（显存占用更高）；可通过环境变量覆盖（例如 `WHISPER_MODEL=small`）。模型权重会下载到 `WHISPER_DOWNLOAD_ROOT`（默认映射到宿主机 `./data/models/whisper`），不会把镜像撑大。
 - 如果你希望**任意后端（包括 Qwen3-ASR / Whisper）都输出 `speaker_turns`（说话人1/2/3...）**，推荐启用 external diarizer（`tingwu-diarizer`，pyannote）：
   - 需要在 HuggingFace 上准备 `HF_TOKEN`（部分 pyannote 模型需要申请访问权限）

@@ -14,17 +14,33 @@ import { cn } from '@/lib/utils'
 import { useMemo, useState } from 'react'
 import { Sparkles, Users, BookText, Bot, Server, Braces, ChevronDown } from 'lucide-react'
 
+function _formatHostWithPort(hostname: string, port: number): string {
+  const h = String(hostname || '').trim() || 'localhost'
+  // IPv6 literal needs brackets for URL host.
+  const host = h.includes(':') && !h.startsWith('[') ? `[${h}]` : h
+  return `${host}:${port}`
+}
+
+function _makePresetBaseUrl(port: number): string {
+  if (typeof window === 'undefined') {
+    return `http://${_formatHostWithPort('localhost', port)}`
+  }
+  const protocol = String(window.location.protocol || 'http:') || 'http:'
+  const hostname = String(window.location.hostname || 'localhost') || 'localhost'
+  return `${protocol}//${_formatHostWithPort(hostname, port)}`
+}
+
 const PRESET_BACKENDS: Array<{ label: string; value: string; baseUrl: string }> = [
   // Radix Select `value` must be non-empty, so we use a sentinel for relative baseUrl.
   { label: '当前服务 (相对路径)', value: '__relative__', baseUrl: '' },
-  { label: 'PyTorch (8101)', value: 'http://localhost:8101', baseUrl: 'http://localhost:8101' },
-  { label: 'ONNX (8102)', value: 'http://localhost:8102', baseUrl: 'http://localhost:8102' },
-  { label: 'SenseVoice (8103)', value: 'http://localhost:8103', baseUrl: 'http://localhost:8103' },
-  { label: 'GGUF (8104)', value: 'http://localhost:8104', baseUrl: 'http://localhost:8104' },
-  { label: 'Whisper (8105)', value: 'http://localhost:8105', baseUrl: 'http://localhost:8105' },
-  { label: 'Qwen3 (8201)', value: 'http://localhost:8201', baseUrl: 'http://localhost:8201' },
-  { label: 'VibeVoice (8202)', value: 'http://localhost:8202', baseUrl: 'http://localhost:8202' },
-  { label: 'Router (8200)', value: 'http://localhost:8200', baseUrl: 'http://localhost:8200' },
+  { label: 'PyTorch (8101)', value: _makePresetBaseUrl(8101), baseUrl: _makePresetBaseUrl(8101) },
+  { label: 'ONNX (8102)', value: _makePresetBaseUrl(8102), baseUrl: _makePresetBaseUrl(8102) },
+  { label: 'SenseVoice (8103)', value: _makePresetBaseUrl(8103), baseUrl: _makePresetBaseUrl(8103) },
+  { label: 'GGUF (8104)', value: _makePresetBaseUrl(8104), baseUrl: _makePresetBaseUrl(8104) },
+  { label: 'Whisper (8105)', value: _makePresetBaseUrl(8105), baseUrl: _makePresetBaseUrl(8105) },
+  { label: 'Qwen3 (8201)', value: _makePresetBaseUrl(8201), baseUrl: _makePresetBaseUrl(8201) },
+  { label: 'VibeVoice (8202)', value: _makePresetBaseUrl(8202), baseUrl: _makePresetBaseUrl(8202) },
+  { label: 'Router (8200)', value: _makePresetBaseUrl(8200), baseUrl: _makePresetBaseUrl(8200) },
 ]
 
 export function TranscribeOptions() {

@@ -16,7 +16,7 @@
 ## 0) TL;DR（常用命令）
 
 ```bash
-# 启动常用“全家桶”（不含 vibevoice/router）
+# 启动常用“全家桶”（含 Qwen3 + VibeVoice；不含 router）
 docker compose -f docker-compose.models.yml --profile all up -d
 
 # 只启动 PyTorch（建议会议）
@@ -61,8 +61,8 @@ docker compose -f docker-compose.models.yml --profile qwen3 up -d
 ### 2.2 一键启动常用“全家桶”
 
 ```bash
-# 包含：diarizer + pytorch + onnx + sensevoice + gguf + whisper + qwen3-asr + tingwu-qwen3
-# 不包含：vibevoice/router（需要额外挂载 VIBEVOICE_REPO_PATH）
+# 包含：diarizer + pytorch + onnx + sensevoice + gguf + whisper + qwen3 + vibevoice
+# 不包含：router（可选；如需统一入口可再启用 --profile router）
 docker compose -f docker-compose.models.yml --profile all up -d
 ```
 
@@ -98,7 +98,7 @@ VIBEVOICE_REPO_PATH=./VibeVoice \
 ```
 
 说明：
-- 首次启动会在 `vibevoice-asr` 容器内自动从 HuggingFace 下载模型权重（默认 `microsoft/VibeVoice-ASR`），缓存到 `huggingface-cache` volume。
+- 首次启动会在 `vibevoice-asr` 容器内自动下载模型权重（默认 `microsoft/VibeVoice-ASR`）；默认优先从 ModelScope 下载，失败再回退 HuggingFace；缓存到 `huggingface-cache` / `model-cache` volume。
 - 观察启动/下载进度：`docker logs -f vibevoice-asr`
 - wrapper 入口：`http://localhost:8202`（TingWu API/UI）；vLLM server 端口：`http://localhost:9002`（仅调试用）
 
@@ -153,9 +153,9 @@ docker logs -f tingwu-gguf
 | `tingwu-whisper` | `whisper` / `all` | `8105` | Whisper（GPU，默认 `large`） |
 | `tingwu-diarizer` | `diarizer` / `all` | `8300` | external diarizer（pyannote） |
 | `qwen3-asr` | `qwen3` / `router` / `all` | `9001` | 远程 ASR server（OpenAI transcription 风格） |
-| `vibevoice-asr` | `vibevoice` / `router` | `9002` | 远程 ASR server（vLLM OpenAI-compatible） |
+| `vibevoice-asr` | `vibevoice` / `router` / `all` | `9002` | 远程 ASR server（vLLM OpenAI-compatible） |
 | `tingwu-qwen3` | `qwen3` / `all` | `8201` | Qwen3 wrapper（提供 TingWu API） |
-| `tingwu-vibevoice` | `vibevoice` | `8202` | VibeVoice wrapper（提供 TingWu API） |
+| `tingwu-vibevoice` | `vibevoice` / `all` | `8202` | VibeVoice wrapper（提供 TingWu API） |
 | `tingwu-router` | `router` | `8200` | 路由后端（提供 TingWu API；不是必须） |
 
 每个 TingWu 实例的常用入口：
@@ -172,9 +172,11 @@ docker logs -f tingwu-gguf
 
 建议：
 
-1) 打开任意一个端口的 UI（例如 `http://localhost:8101`）  
-2) 在「转写选项 → 后端」里切换 `Base URL`（例如 `http://localhost:8105` / `8201`）  
+1) 打开任意一个端口的 UI（例如 `http://<server-host>:8101`）  
+2) 在「转写选项 → 后端」里切换 `Base URL`（例如 `http://<server-host>:8105` / `8201`）  
 3) 前端会把请求发到你选择的端口
+
+> 提示：前端的“快速选择”预设会自动使用**当前页面的域名/IP**拼出 `:<port>`（不再固定 `localhost`），因此更适合“服务器部署后，同事从公司网访问”的场景。
 
 ---
 
@@ -271,7 +273,7 @@ Qwen3-ASR、Whisper 等常见转写服务 **不原生输出 speaker**。
 常用配置（`.env`）：
 
 - `QWEN3_MODEL_ID`（默认 `Qwen/Qwen3-ASR-0.6B`）
-- `QWEN3_MAX_MODEL_LEN`（默认 `32768`；显存紧张时可继续调小）
+- `QWEN3_MAX_MODEL_LEN`（`docker-compose.models.yml` 默认 `16384`；显存紧张时可继续调小）
 - `QWEN3_GPU_MEMORY_UTILIZATION`
 
 ### 7.2 VibeVoice-ASR（`vibevoice-asr` + `tingwu-vibevoice`）

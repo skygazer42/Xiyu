@@ -240,6 +240,7 @@ Content-Type: multipart/form-data
 | apply_hotword | bool | ❌ | true | 是否应用热词纠错 |
 | apply_llm | bool | ❌ | false | 是否启用 LLM 润色 |
 | llm_role | string | ❌ | "default" | LLM 角色 (default/translator/code/corrector) |
+| include_srt | bool | ❌ | false | 是否在响应中包含 `srt` 字幕内容（基于 `sentences/speaker_turns` 生成） |
 | hotwords | string | ❌ | null | 临时热词 (空格分隔) |
 | asr_options | string | ❌ | null | 请求级调参 JSON 字符串（例如 `{"postprocess": {...}}`） |
 
@@ -270,6 +271,7 @@ Content-Type: multipart/form-data
     }
   ],
   "transcript": "[00:00 - 00:03] 说话人甲: 今天的会议主要讨论人工智能的应用。",
+  "srt": "1\\n00:00:00,000 --> 00:00:03,500\\n[说话人甲] 今天的会议主要讨论人工智能的应用。\\n",
   "raw_text": "今天的会议主要讨论人工只能的应用"
 }
 ```
@@ -339,6 +341,69 @@ Content-Type: multipart/form-data
       "error": "音频格式不支持"
     }
   ]
+}
+```
+
+---
+
+### 全量转写（多模型对比 + LLM 融合）
+
+该接口会在同一份音频上并发调用多个后端（Compose 多容器网络内），并可选调用一次 LLM 进行融合润色，返回：
+
+- `candidates`：各后端候选结果（用于对比/追踪）
+- `final`：最终融合后的转写结果（结构与单文件接口一致）
+
+```
+POST /api/v1/transcribe/all
+Content-Type: multipart/form-data
+```
+
+**请求参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| file | File | ✅ | - | 音频文件 |
+| with_speaker | bool | ❌ | true | 是否启用说话人（推荐开启，作为 base turns 骨架） |
+| apply_hotword | bool | ❌ | true | 是否应用热词纠错 |
+| apply_llm | bool | ❌ | true | 是否调用 LLM 做融合润色（依赖 `LLM_ENABLE=true` 配置） |
+| llm_role | string | ❌ | "policy_meeting" | LLM 角色（推荐 `policy_meeting` / `meeting` / `corrector`） |
+| include_srt | bool | ❌ | true | 是否在 `final` 中包含 `srt` 字幕内容 |
+| hotwords | string | ❌ | null | 临时热词 (空格分隔) |
+| asr_options | string | ❌ | null | 请求级调参 JSON 字符串（同单文件） |
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "base_backend": "pytorch",
+  "llm_used": true,
+  "llm_role": "policy_meeting",
+  "candidates": [
+    {
+      "backend": "pytorch",
+      "base_url": "http://tingwu-pytorch:8000",
+      "success": true,
+      "http_status": 200,
+      "code": 0,
+      "elapsed_ms": 1234,
+      "text": "候选文本（可能截断）",
+      "cleaned_text": "用于 LLM 参考的清洗文本（可能截断）",
+      "error": null
+    }
+  ],
+  "final": {
+    "code": 0,
+    "text": "最终融合后的听记稿...",
+    "sentences": [
+      { "text": "…", "start": 0, "end": 1000, "speaker": "说话人甲", "speaker_id": 0 }
+    ],
+    "speaker_turns": [
+      { "speaker": "说话人甲", "speaker_id": 0, "start": 0, "end": 1000, "text": "…", "sentence_count": 1 }
+    ],
+    "transcript": "[00:00 - 00:01] 说话人甲: …",
+    "srt": "1\\n00:00:00,000 --> 00:00:01,000\\n[说话人甲] …\\n"
+  }
 }
 ```
 
