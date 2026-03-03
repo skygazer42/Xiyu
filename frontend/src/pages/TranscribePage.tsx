@@ -365,21 +365,21 @@ export default function TranscribePage() {
     setResult(null)
     setResultFilename(undefined)
 
-	    try {
-	      const transcribeOptions = {
-	        with_speaker: options.with_speaker,
-	        apply_hotword: options.apply_hotword,
-	        apply_llm: ensembleOptions.apply_llm,
-	        llm_role: ensembleOptions.llm_role,
-	        include_srt: ensembleOptions.include_srt,
-	        hotwords: tempHotwords || undefined,
-	        asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
-	        speaker_label_style: options.speaker_label_style,
-	      }
-	
-	      const response = await transcribeAllModels(files[0], {
-	        ...transcribeOptions,
-	        signal: abortControllerRef.current?.signal,
+    try {
+      const transcribeOptions = {
+        with_speaker: options.with_speaker,
+        apply_hotword: options.apply_hotword,
+        apply_llm: ensembleOptions.apply_llm,
+        llm_role: ensembleOptions.llm_role,
+        include_srt: ensembleOptions.include_srt,
+        hotwords: tempHotwords || undefined,
+        asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
+        speaker_label_style: options.speaker_label_style,
+      }
+
+      const response = await transcribeAllModels(files[0], {
+        ...transcribeOptions,
+        signal: abortControllerRef.current?.signal,
         onUploadProgress: (progress) => {
           const p = Math.max(0, Math.min(100, progress))
           if (p >= 99) {
@@ -390,26 +390,26 @@ export default function TranscribePage() {
           setUploadProgress(p)
         },
       })
-	      if (response.code === 0) {
-	        setEnsembleResult(response)
-	        setResult(response.final)
-	        setResultFilename(files[0].name.replace(/\.[^/.]+$/, ''))
-	        addItem({
-	          filename: files[0].name,
-	          text: response.final.text,
-	          sentences: response.final.sentences,
-	          rawText: response.final.raw_text,
-	          options: {
-	            withSpeaker: options.with_speaker,
-	            applyHotword: options.apply_hotword,
-	            applyLlm: ensembleOptions.apply_llm,
-	            llmRole: ensembleOptions.llm_role,
-	          },
-	        })
-	        toast.success(ensembleOptions.apply_llm ? '全量融合完成' : '全量对比完成')
-	      } else {
-	        toast.error('全量融合失败')
-	      }
+      if (response.code === 0) {
+        setEnsembleResult(response)
+        setResult(response.final)
+        setResultFilename(files[0].name.replace(/\.[^/.]+$/, ''))
+        addItem({
+          filename: files[0].name,
+          text: response.final.text,
+          sentences: response.final.sentences,
+          rawText: response.final.raw_text,
+          options: {
+            withSpeaker: options.with_speaker,
+            applyHotword: options.apply_hotword,
+            applyLlm: ensembleOptions.apply_llm,
+            llmRole: ensembleOptions.llm_role,
+          },
+        })
+        toast.success(ensembleOptions.apply_llm ? '全量融合完成' : '全量对比完成')
+      } else {
+        toast.error(ensembleOptions.apply_llm ? '全量融合失败' : '全量对比失败')
+      }
     } catch (error) {
       console.error('Ensemble transcription error:', error)
       const isCanceled =
