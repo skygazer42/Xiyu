@@ -47,6 +47,11 @@ data/_tmp/
 # Docker
 *.log
 
+# Env (secrets)
+.env
+.env.*
+!.env.example
+
 # Cache
 .cache/
 .pytest_cache/
