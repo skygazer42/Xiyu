@@ -50,7 +50,7 @@ export function ExportMenu({ result, filename = 'transcript' }: ExportMenuProps)
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm">
           <Download className="h-4 w-4 mr-2" />
-          导出
+          下载
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

@@ -2,7 +2,6 @@ import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Navbar } from './Navbar'
 import { MobileNav } from './MobileNav'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { ShortcutsDialog } from '@/components/help/ShortcutsDialog'
 
 export function AppLayout() {
@@ -22,11 +21,11 @@ export function AppLayout() {
         <Navbar />
 
         {/* 页面内容 */}
-        <ScrollArea className="flex-1">
-          <main id="main-content" className="container mx-auto py-6 px-4 md:px-6 pb-20 md:pb-6">
+        <main id="main-content" className="flex-1 min-h-0 overflow-y-auto">
+          <div className="container mx-auto py-6 px-4 md:px-6 pb-20 md:pb-6">
             <Outlet />
-          </main>
-        </ScrollArea>
+          </div>
+        </main>
       </div>
 
       {/* 移动端底部导航 */}
