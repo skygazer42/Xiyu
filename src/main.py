@@ -4,7 +4,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config import settings
@@ -98,7 +98,22 @@ async def health_check():
 
 @app.get("/", tags=["system"])
 async def root():
-    """服务信息"""
+    """Root: serve Web UI if built; otherwise return service info JSON."""
+    if FRONTEND_DIST.exists():
+        index_file = FRONTEND_DIST / "index.html"
+        if index_file.exists() and index_file.is_file():
+            return FileResponse(index_file)
+
+    return {
+        "name": settings.app_name,
+        "version": settings.version,
+        "docs": "/docs",
+    }
+
+
+@app.get("/service-info", tags=["system"])
+async def service_info():
+    """服务信息（JSON）。"""
     return {
         "name": settings.app_name,
         "version": settings.version,
@@ -142,8 +157,6 @@ async def get_metrics_prometheus():
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 if FRONTEND_DIST.exists():
     # SPA fallback: 所有未匹配的路由返回 index.html
-    from fastapi.responses import FileResponse
-
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         """SPA 路由回退"""
