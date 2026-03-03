@@ -369,7 +369,10 @@ export default function TranscribePage() {
         ...options,
         apply_llm: true,
         // Default to the policy role for this button unless user explicitly chose another.
-        llm_role: options.llm_role && options.llm_role !== 'default' ? options.llm_role : 'policy_meeting_v2',
+        llm_role:
+          options.llm_role && options.llm_role !== 'default'
+            ? options.llm_role
+            : 'policy_meeting_aggressive',
         hotwords: tempHotwords || undefined,
         asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
       }

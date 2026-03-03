@@ -6,6 +6,7 @@ from src.core.llm.roles.code import CodeRole
 from src.core.llm.roles.corrector import CorrectorRole
 from src.core.llm.roles.meeting import MeetingRole
 from src.core.llm.roles.policy_meeting import PolicyMeetingRole
+from src.core.llm.roles.policy_meeting_aggressive import PolicyMeetingAggressiveRole
 from src.core.llm.roles.policy_meeting_v2 import PolicyMeetingV2Role
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     'CorrectorRole',
     'MeetingRole',
     'PolicyMeetingRole',
+    'PolicyMeetingAggressiveRole',
     'PolicyMeetingV2Role',
 ]

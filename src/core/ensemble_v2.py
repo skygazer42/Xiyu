@@ -218,7 +218,7 @@ async def transcribe_all_models(
     llm_role_effective = (
         str(llm_role).strip()
         if llm_role is not None and str(llm_role).strip()
-        else str(getattr(settings, "ensemble_llm_role", "") or "").strip() or "policy_meeting_v2"
+        else str(getattr(settings, "ensemble_llm_role", "") or "").strip() or "policy_meeting_aggressive"
     )
     timeout_s = float(getattr(settings, "ensemble_timeout_s", 600.0) or 600.0)
     max_concurrent = int(getattr(settings, "ensemble_max_concurrent", 4) or 4)

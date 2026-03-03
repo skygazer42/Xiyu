@@ -287,7 +287,7 @@ curl -X POST "http://localhost:8101/api/v1/transcribe/all" \
   -F "with_speaker=true" \
   -F "apply_hotword=true" \
   -F "apply_llm=true" \
-  -F "llm_role=policy_meeting_v2"
+  -F "llm_role=policy_meeting_aggressive"
 ```
 
 #### 不用 Docker：直接 Python 启动（本地/裸机）

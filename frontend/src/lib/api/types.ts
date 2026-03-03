@@ -196,7 +196,15 @@ export interface TranscribeOptions {
   with_speaker?: boolean
   apply_hotword?: boolean
   apply_llm?: boolean
-  llm_role?: 'default' | 'translator' | 'code' | 'corrector' | 'meeting' | 'policy_meeting' | 'policy_meeting_v2'
+  llm_role?:
+    | 'default'
+    | 'translator'
+    | 'code'
+    | 'corrector'
+    | 'meeting'
+    | 'policy_meeting'
+    | 'policy_meeting_v2'
+    | 'policy_meeting_aggressive'
   hotwords?: string
   speaker_label_style?: 'numeric' | 'zh'
 }
