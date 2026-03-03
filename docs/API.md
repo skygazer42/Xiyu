@@ -366,7 +366,7 @@ Content-Type: multipart/form-data
 | with_speaker | bool | ❌ | true | 是否启用说话人（推荐开启，作为 base turns 骨架） |
 | apply_hotword | bool | ❌ | true | 是否应用热词纠错 |
 | apply_llm | bool | ❌ | true | 是否调用 LLM 做融合润色（依赖 `LLM_ENABLE=true` 配置） |
-| llm_role | string | ❌ | "policy_meeting" | LLM 角色（推荐 `policy_meeting` / `meeting` / `corrector`） |
+| llm_role | string | ❌ | "policy_meeting_v2" | LLM 角色（推荐 `policy_meeting_v2` / `policy_meeting`） |
 | include_srt | bool | ❌ | true | 是否在 `final` 中包含 `srt` 字幕内容 |
 | hotwords | string | ❌ | null | 临时热词 (空格分隔) |
 | asr_options | string | ❌ | null | 请求级调参 JSON 字符串（同单文件） |
@@ -378,7 +378,7 @@ Content-Type: multipart/form-data
   "code": 0,
   "base_backend": "pytorch",
   "llm_used": true,
-  "llm_role": "policy_meeting",
+  "llm_role": "policy_meeting_v2",
   "candidates": [
     {
       "backend": "pytorch",
