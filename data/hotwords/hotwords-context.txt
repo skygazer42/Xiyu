@@ -20,6 +20,9 @@ SenseVoice
 Qwen3-ASR
 VibeVoice-ASR
 
+# 政务/政策会议常见表达（易错词）
+面子工程
+
 # 组织/产品名
 OpenAI
 Anthropic
@@ -27,4 +30,3 @@ ModelScope
 HuggingFace
 Docker
 Kubernetes
-

@@ -202,7 +202,7 @@ async def transcribe_all_models_api(
     with_speaker: bool = Form(default=True, description="是否进行说话人识别（推荐开启）"),
     apply_hotword: bool = Form(default=True, description="是否应用热词纠错"),
     apply_llm: bool = Form(default=True, description="是否调用 LLM 进行多模型融合润色"),
-    llm_role: str = Form(default="policy_meeting", description="LLM 角色（policy_meeting/meeting/corrector/...）"),
+    llm_role: str = Form(default="policy_meeting_v2", description="LLM 角色（policy_meeting_v2/policy_meeting/meeting/...）"),
     include_srt: bool = Form(default=True, description="是否在 final 中包含 SRT 字幕内容"),
     hotwords: Optional[str] = Form(default=None, description="额外热词 (空格分隔)"),
     asr_options: Optional[str] = Form(default=None, description="ASR options JSON (per-request tuning)"),
