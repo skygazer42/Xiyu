@@ -4,7 +4,7 @@
 
 这样你可以：
 
-- 同一份前端 UI，通过切换 `Base URL` 做 A/B 对比
+- 同一份前端 UI，通过切换「后端（快速选择）」做 A/B 对比
 - 会议 / 视频 / 电话会议按需选择：快 / 准 / 低资源 / 支持 speaker
 
 > 从 0 开始的部署请先看 `docs/DEPLOYMENT.md`。  
@@ -166,17 +166,19 @@ docker logs -f tingwu-gguf
 
 ---
 
-## 4) 前端怎么切后端（Base URL）
+## 4) 前端怎么切后端（快速选择）
 
 每个 TingWu 容器都内置相同的前端 UI（只要镜像包含 `frontend/dist`）。
 
 建议：
 
 1) 打开任意一个端口的 UI（例如 `http://<server-host>:8101`）  
-2) 在「转写选项 → 后端」里切换 `Base URL`（例如 `http://<server-host>:8105` / `8201`）  
+2) 在「转写选项 → 后端 → 快速选择」里切换后端（例如 `Whisper (8105)` / `Qwen3 (8201)` / `Router (8200)`）  
 3) 前端会把请求发到你选择的端口
 
 > 提示：前端的“快速选择”预设会自动使用**当前页面的域名/IP**拼出 `:<port>`（不再固定 `localhost`），因此更适合“服务器部署后，同事从公司网访问”的场景。
+>
+> 如果你是“公司内网只开放 1 个端口”的部署方式（推荐 router），请在 UI 里选择「当前服务 (相对路径)」，让所有请求都打到当前端口（不依赖其它后端端口对外可达）。
 
 ---
 
@@ -283,12 +285,13 @@ Qwen3-ASR、Whisper 等常见转写服务 **不原生输出 speaker**。
 1) `vibevoice-asr`：vLLM OpenAI-compatible server（吃 GPU）  
 2) `tingwu-vibevoice`：TingWu wrapper（提供统一 TingWu API）
 
-> VibeVoice 需要 `VIBEVOICE_REPO_PATH` 挂载本地 repo（详见 `docker-compose.models.yml` 注释）。
+> VibeVoice 默认使用仓库内置的 `./third_party/VibeVoice` 快照挂载进容器（无需额外 clone）。  
+> 如需使用你自己的 repo/mirror，再设置 `VIBEVOICE_REPO_PATH` 覆盖挂载路径（详见 `docker-compose.models.yml` 注释）。
 
 ---
 
 ## 8) 常用组合推荐（会议）
 
 1) **稳/省心**：`pytorch` + `diarizer`（external diarizer）  
-2) **多模型对比**：`--profile all` + 前端切 `Base URL`  
+2) **多模型对比**：`--profile all` + 前端「转写选项 → 后端 → 快速选择」切端口  
 3) **远程 ASR + speaker**：`qwen3` + `diarizer`（或 `qwen3` + fallback diarization）

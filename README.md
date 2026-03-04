@@ -52,7 +52,36 @@
 > | `docker-compose.models.yml` | **多模型按需启动**：每个后端一个容器，按 profile 选择 | 生产/A-B 对比/多后端并存 |
 > | `docker-compose.remote-asr.yml` | 远程 ASR (Qwen3 + VibeVoice) + TingWu router | 大模型 ASR 部署 |
 >
-> `docker-compose.yml` 等价于 `docker-compose.models.yml --profile pytorch`，只是写法更简单。如果你只需要一个后端，用前者；如果想同时跑多个后端或者用 Qwen3/VibeVoice，用后者。
+> `docker-compose.yml` 与 `docker-compose.models.yml --profile pytorch` 启动的是同一个“PyTorch Paraformer”后端，但部署形态不同：
+> - 前者是「单容器单端口」形态，默认统一端口 `:8000`
+> - 后者是「多容器多端口」形态，PyTorch 默认端口 `:8101`，并可同时启动其它后端（Whisper/Qwen3/VibeVoice 等）
+
+##### 公司内网部署（推荐：只开放 1 个端口）
+
+如果你的目标是：**公司网段可以访问你的前端，并使用全部功能**，但你不想暴露一堆模型端口，推荐用 `router` 做统一入口。
+
+- 对外开放端口数：**1**
+- 对外开放端口：`8200`（`tingwu-router`，同时提供 **Web UI + API**）
+- 内网访问：`http://<server-ip>:8200`
+
+启动（会自动拉起它依赖的远程 ASR 服务：`qwen3-asr`、`vibevoice-asr`）：
+
+```bash
+./scripts/start.sh models router
+```
+
+使用建议：
+- 在 `http://<server-ip>:8200` 打开 UI 后，把「转写选项 → 后端」保持在「当前服务 (相对路径)」，这样**所有请求都走 router**，不需要公司网段直连其它端口。
+- 如果你只需要“单模型转写”（不需要 Qwen3/VibeVoice/多后端），也只需开放 **1 个端口**：`8000`（`docker compose up -d`）。
+
+端口暴露建议（强烈推荐）：
+- 公司内网只放行 `8200`（其余 `810x/820x/8300/900x` 不放行即可）
+- 或者在 `docker-compose.models.yml` 里把调试端口绑定到 `127.0.0.1`（只允许本机访问），例如：
+
+```yaml
+ports:
+  - "127.0.0.1:9001:8000"
+```
 
 ##### 单模型快速启动
 
@@ -101,6 +130,22 @@ docker compose up -d
 - 只暴露 `tingwu-router` 的端口（默认 `8200`，同时提供 **Web UI + API**）
 - 其它 `810x/820x/8300/900x` 端口只给 Docker 内部互通即可（不需要公司网段直连）
 - 前端里选择「当前服务 (相对路径)」，即可把请求统一打到 router
+
+端口一览（默认端口）：
+
+| 端口 | 容器/服务 | 建议对外开放 | 用途 |
+|------|----------|--------------|------|
+| `8200` | `tingwu-router` | ✅ 是（推荐只开它） | Web UI + 统一 API 入口 |
+| `8101` | `tingwu-pytorch` | ❌ 否 | 直连某个后端做 A/B 或排障 |
+| `8102` | `tingwu-onnx` | ❌ 否 | 同上 |
+| `8103` | `tingwu-sensevoice` | ❌ 否 | 同上 |
+| `8104` | `tingwu-gguf` | ❌ 否 | 同上 |
+| `8105` | `tingwu-whisper` | ❌ 否 | 同上 |
+| `8201` | `tingwu-qwen3` | ❌ 否 | 同上（TingWu wrapper） |
+| `8202` | `tingwu-vibevoice` | ❌ 否 | 同上（TingWu wrapper） |
+| `8300` | `tingwu-diarizer` | ❌ 否 | 说话人分离服务（给后端调用） |
+| `9001` | `qwen3-asr` | ❌ 否 | 远程 ASR server（仅调试） |
+| `9002` | `vibevoice-asr` | ❌ 否 | 远程 ASR server（仅调试） |
 
 
 （按需启动）：
@@ -211,7 +256,7 @@ docker logs -f tingwu-gguf
 
 一键启动（起一套“够用的全家桶”）
 
-如果你希望一次性把常用容器都拉起来（例如你有 48GB 显存，后续在前端选择 Base URL 使用），推荐用 `all-lite`（不包含 GGUF，更不容易因为缺模型文件而启动失败）：
+如果你希望一次性把常用容器都拉起来（例如你有 48GB 显存，后续在前端「转写选项 → 后端 → 快速选择」切换后端使用），推荐用 `all-lite`（不包含 GGUF，更不容易因为缺模型文件而启动失败）：
 
 ```bash
 # 推荐：不含 GGUF，不需要额外准备本地模型文件
@@ -249,7 +294,8 @@ docker compose -f docker-compose.models.yml down
 ```
 
 提示：
-- 打开任意一个 TingWu 容器的前端页面后，可在「转写选项 → 后端」里切换 `Base URL`（例如 `http://<server-host>:8101` / `8102` / `8201`），前端会把请求发到你选择的端口（预设会自动使用当前页面的域名/IP，不再固定 `localhost`）。
+- 打开任意一个 TingWu 容器的前端页面后，可在「转写选项 → 后端 → 快速选择」里切换后端端口（`8101/8102/8201/...`），前端会把请求发到你选择的服务（预设会自动使用当前页面的域名/IP，不再固定 `localhost`）。
+- 转写页的「全量优化」按钮旁边支持直接选择“融合程度”：仅对比（不走 LLM）/严格/平衡/激进。
 - Whisper 容器默认使用 `WHISPER_MODEL=large`（显存占用更高）；可通过环境变量覆盖（例如 `WHISPER_MODEL=small`）。模型权重会下载到 `WHISPER_DOWNLOAD_ROOT`（默认映射到宿主机 `./data/models/whisper`），不会把镜像撑大。
 - 如果你希望**任意后端（包括 Qwen3-ASR / Whisper）都输出 `speaker_turns`（说话人1/2/3...）**，推荐启用 external diarizer（`tingwu-diarizer`，pyannote）：
   - 需要在 HuggingFace 上准备 `HF_TOKEN`（部分 pyannote 模型需要申请访问权限）
