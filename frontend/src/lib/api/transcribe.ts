@@ -97,6 +97,9 @@ export async function transcribeAudio(
   if (transcribeOptions.llm_role) {
     formData.append('llm_role', transcribeOptions.llm_role)
   }
+  if (transcribeOptions.target_backend) {
+    formData.append('target_backend', transcribeOptions.target_backend)
+  }
   if (transcribeOptions.hotwords) {
     formData.append('hotwords', transcribeOptions.hotwords)
   }
@@ -225,6 +228,9 @@ export async function transcribeBatch(
   if (transcribeOptions.llm_role) {
     formData.append('llm_role', transcribeOptions.llm_role)
   }
+  if (transcribeOptions.target_backend) {
+    formData.append('target_backend', transcribeOptions.target_backend)
+  }
   if (transcribeOptions.hotwords) {
     formData.append('hotwords', transcribeOptions.hotwords)
   }
@@ -285,6 +291,9 @@ export async function transcribeUrl(
   }
   if (transcribeOptions.llm_role) {
     formData.append('llm_role', transcribeOptions.llm_role)
+  }
+  if (transcribeOptions.target_backend) {
+    formData.append('target_backend', transcribeOptions.target_backend)
   }
   if (transcribeOptions.hotwords) {
     formData.append('hotwords', transcribeOptions.hotwords)
@@ -387,6 +396,9 @@ export async function transcribeVideo(
   }
   if (transcribeOptions.llm_role) {
     formData.append('llm_role', transcribeOptions.llm_role)
+  }
+  if (transcribeOptions.target_backend) {
+    formData.append('target_backend', transcribeOptions.target_backend)
   }
   if (transcribeOptions.hotwords) {
     formData.append('hotwords', transcribeOptions.hotwords)

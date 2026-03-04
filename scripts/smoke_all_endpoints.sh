@@ -12,6 +12,7 @@ set -uo pipefail
 #   TIMEOUT_S=10            Per-request curl timeout seconds (non-transcribe endpoints)
 #   TRANSCRIBE_TIMEOUT_S=60 /transcribe curl timeout seconds
 #   DIARIZER_PORT=8300      Optional diarizer port (set empty to skip)
+#   URL_AUDIO_URL="https://..." Optional public URL for /api/v1/trans/url smoke test
 #
 # Notes:
 # - This is a best-effort smoke test. Some backends require extra model artifacts
@@ -34,6 +35,9 @@ REMOTE_ASR_TIMEOUT_S="${REMOTE_ASR_TIMEOUT_S:-8}"
 REMOTE_ASR_READY_RETRIES="${REMOTE_ASR_READY_RETRIES:-90}"
 REMOTE_ASR_READY_SLEEP_S="${REMOTE_ASR_READY_SLEEP_S:-2}"
 AUDIO="${AUDIO:-data/benchmark/test_short.mp3}"
+URL_AUDIO_URL="${URL_AUDIO_URL:-}"
+URL_TASK_POLL_RETRIES="${URL_TASK_POLL_RETRIES:-60}"
+URL_TASK_POLL_SLEEP_S="${URL_TASK_POLL_SLEEP_S:-2}"
 
 if [ ! -f "${AUDIO}" ]; then
   echo "ERROR: AUDIO not found: ${AUDIO}" >&2
@@ -226,8 +230,30 @@ raise SystemExit(f"expected failed_count=0, got failed_count={failed!r}")
 PY
 }
 
+_assert_json_code() {
+  # Usage: _assert_json_code JSON_FILE EXPECTED_CODE
+  local f="$1"
+  local expected="$2"
+  python3 - "${f}" "${expected}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+expected = int(sys.argv[2])
+with open(path, "r", encoding="utf-8") as fp:
+    obj = json.load(fp)
+
+code = obj.get("code")
+if code != expected:
+    raise SystemExit(f"expected code={expected}, got code={code!r}")
+PY
+}
+
 _test_one_base() {
   local base="$1"
+  local tmp
+  local code
+  local task_id=""
 
   echo ""
   echo "=============================="
@@ -237,21 +263,250 @@ _test_one_base() {
   if _curl_json "${base}/health"; then _ok "${base} GET /health"; else _fail "${base} GET /health"; fi
   if _curl_json "${base}/openapi.json"; then _ok "${base} GET /openapi.json"; else _fail "${base} GET /openapi.json"; fi
   if _curl_json "${base}/api/v1/backend"; then _ok "${base} GET /api/v1/backend"; else _fail "${base} GET /api/v1/backend"; fi
+  if _curl_json "${base}/api/v1/backend/targets"; then _ok "${base} GET /api/v1/backend/targets"; else _fail "${base} GET /api/v1/backend/targets"; fi
 
   if _curl_json "${base}/metrics"; then _ok "${base} GET /metrics"; else _fail "${base} GET /metrics"; fi
   if _curl_text "${base}/metrics/prometheus"; then _ok "${base} GET /metrics/prometheus"; else _fail "${base} GET /metrics/prometheus"; fi
 
   if _curl_json "${base}/config"; then _ok "${base} GET /config"; else _fail "${base} GET /config"; fi
   if _curl_json "${base}/config/all"; then _ok "${base} GET /config/all"; else _fail "${base} GET /config/all"; fi
+  if _curl_json "${base}/config" -X POST -H "Content-Type: application/json" -d '{"updates":{}}'; then _ok "${base} POST /config (no-op)"; else _fail "${base} POST /config (no-op)"; fi
   if _curl_json "${base}/config/reload" -X POST; then _ok "${base} POST /config/reload"; else _fail "${base} POST /config/reload"; fi
 
   if _curl_json "${base}/api/v1/hotwords"; then _ok "${base} GET /api/v1/hotwords"; else _fail "${base} GET /api/v1/hotwords"; fi
   if _curl_json "${base}/api/v1/hotwords/context"; then _ok "${base} GET /api/v1/hotwords/context"; else _fail "${base} GET /api/v1/hotwords/context"; fi
+  if _curl_json "${base}/api/v1/hotwords/rules"; then _ok "${base} GET /api/v1/hotwords/rules"; else _fail "${base} GET /api/v1/hotwords/rules"; fi
+  if _curl_json "${base}/api/v1/hotwords/rectify"; then _ok "${base} GET /api/v1/hotwords/rectify"; else _fail "${base} GET /api/v1/hotwords/rectify"; fi
   if _curl_json "${base}/api/v1/hotwords/reload" -X POST; then _ok "${base} POST /api/v1/hotwords/reload"; else _fail "${base} POST /api/v1/hotwords/reload"; fi
   if _curl_json "${base}/api/v1/hotwords/context/reload" -X POST; then _ok "${base} POST /api/v1/hotwords/context/reload"; else _fail "${base} POST /api/v1/hotwords/context/reload"; fi
+  if _curl_json "${base}/api/v1/hotwords/rules/reload" -X POST; then _ok "${base} POST /api/v1/hotwords/rules/reload"; else _fail "${base} POST /api/v1/hotwords/rules/reload"; fi
+  if _curl_json "${base}/api/v1/hotwords/rectify/reload" -X POST; then _ok "${base} POST /api/v1/hotwords/rectify/reload"; else _fail "${base} POST /api/v1/hotwords/rectify/reload"; fi
 
-  local tmp
-  local code
+  # ------------------------------------------------------------
+  # UI stateful actions (save/append/restore)
+  # ------------------------------------------------------------
+
+  # Hotwords: update (no-op), append dummy, restore
+  local hw_get hw_restore hw_append
+  hw_get="$(_tmpfile)"
+  code="$(_curl_to_file "${hw_get}" "${base}/api/v1/hotwords")"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${hw_get}" >/dev/null 2>&1; then
+    hw_restore="$(_tmpfile)"
+    python3 - "${hw_get}" "${hw_restore}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+hotwords=obj.get("hotwords") or []
+if not isinstance(hotwords, list):
+    hotwords=[]
+json.dump({"hotwords": hotwords}, open(sys.argv[2],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords" -X POST -H "Content-Type: application/json" --data-binary @"${hw_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords (save no-op)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords (save no-op)"
+    fi
+    rm -f "${tmp}" || true
+
+    hw_append="$(_tmpfile)"
+    python3 - "${hw_append}" <<'PY'
+import json, sys
+json.dump({"hotwords": ["__xiyu_smoke_test__"]}, open(sys.argv[1],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/append" -X POST -H "Content-Type: application/json" --data-binary @"${hw_append}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/append"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/append"
+    fi
+    rm -f "${tmp}" || true
+
+    # Restore original hotwords (best-effort)
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords" -X POST -H "Content-Type: application/json" --data-binary @"${hw_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords (restore)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords (restore)"
+    fi
+    rm -f "${tmp}" || true
+
+    rm -f "${hw_restore}" "${hw_append}" || true
+  else
+    _print_body_head "${hw_get}"
+    _fail "${base} GET /api/v1/hotwords (for stateful tests)"
+  fi
+  rm -f "${hw_get}" || true
+
+  # Context hotwords: update (no-op), append dummy, restore
+  local chw_get chw_restore chw_append
+  chw_get="$(_tmpfile)"
+  code="$(_curl_to_file "${chw_get}" "${base}/api/v1/hotwords/context")"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${chw_get}" >/dev/null 2>&1; then
+    chw_restore="$(_tmpfile)"
+    python3 - "${chw_get}" "${chw_restore}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+hotwords=obj.get("hotwords") or []
+if not isinstance(hotwords, list):
+    hotwords=[]
+json.dump({"hotwords": hotwords}, open(sys.argv[2],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/context" -X POST -H "Content-Type: application/json" --data-binary @"${chw_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/context (save no-op)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/context (save no-op)"
+    fi
+    rm -f "${tmp}" || true
+
+    chw_append="$(_tmpfile)"
+    python3 - "${chw_append}" <<'PY'
+import json, sys
+json.dump({"hotwords": ["__xiyu_smoke_ctx__"]}, open(sys.argv[1],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/context/append" -X POST -H "Content-Type: application/json" --data-binary @"${chw_append}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/context/append"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/context/append"
+    fi
+    rm -f "${tmp}" || true
+
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/context" -X POST -H "Content-Type: application/json" --data-binary @"${chw_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/context (restore)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/context (restore)"
+    fi
+    rm -f "${tmp}" || true
+
+    rm -f "${chw_restore}" "${chw_append}" || true
+  else
+    _print_body_head "${chw_get}"
+    _fail "${base} GET /api/v1/hotwords/context (for stateful tests)"
+  fi
+  rm -f "${chw_get}" || true
+
+  # Rules: update (no-op), append comment, restore
+  local rules_get rules_restore rules_append
+  rules_get="$(_tmpfile)"
+  code="$(_curl_to_file "${rules_get}" "${base}/api/v1/hotwords/rules")"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${rules_get}" >/dev/null 2>&1; then
+    rules_restore="$(_tmpfile)"
+    python3 - "${rules_get}" "${rules_restore}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+text=obj.get("text") or ""
+json.dump({"text": text}, open(sys.argv[2],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/rules" -X POST -H "Content-Type: application/json" --data-binary @"${rules_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/rules (save no-op)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/rules (save no-op)"
+    fi
+    rm -f "${tmp}" || true
+
+    rules_append="$(_tmpfile)"
+    python3 - "${rules_append}" <<'PY'
+import json, sys
+json.dump({"text": "\n# __xiyu_smoke_rules__\n"}, open(sys.argv[1],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/rules/append" -X POST -H "Content-Type: application/json" --data-binary @"${rules_append}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/rules/append"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/rules/append"
+    fi
+    rm -f "${tmp}" || true
+
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/rules" -X POST -H "Content-Type: application/json" --data-binary @"${rules_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/rules (restore)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/rules (restore)"
+    fi
+    rm -f "${tmp}" || true
+
+    rm -f "${rules_restore}" "${rules_append}" || true
+  else
+    _print_body_head "${rules_get}"
+    _fail "${base} GET /api/v1/hotwords/rules (for stateful tests)"
+  fi
+  rm -f "${rules_get}" || true
+
+  # Rectify: update (no-op), append record, restore
+  local rect_get rect_restore rect_append
+  rect_get="$(_tmpfile)"
+  code="$(_curl_to_file "${rect_get}" "${base}/api/v1/hotwords/rectify")"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${rect_get}" >/dev/null 2>&1; then
+    rect_restore="$(_tmpfile)"
+    python3 - "${rect_get}" "${rect_restore}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+text=obj.get("text") or ""
+json.dump({"text": text}, open(sys.argv[2],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/rectify" -X POST -H "Content-Type: application/json" --data-binary @"${rect_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/rectify (save no-op)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/rectify (save no-op)"
+    fi
+    rm -f "${tmp}" || true
+
+    rect_append="$(_tmpfile)"
+    python3 - "${rect_append}" <<'PY'
+import json, sys, time
+payload={"wrong": f"__xiyu_smoke_wrong_{int(time.time())}__", "right": "__xiyu_smoke_right__"}
+json.dump(payload, open(sys.argv[1],"w",encoding="utf-8"), ensure_ascii=False)
+PY
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/rectify/append" -X POST -H "Content-Type: application/json" --data-binary @"${rect_append}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/rectify/append"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/rectify/append"
+    fi
+    rm -f "${tmp}" || true
+
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file "${tmp}" "${base}/api/v1/hotwords/rectify" -X POST -H "Content-Type: application/json" --data-binary @"${rect_restore}")"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+      _ok "${base} POST /api/v1/hotwords/rectify (restore)"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/hotwords/rectify (restore)"
+    fi
+    rm -f "${tmp}" || true
+
+    rm -f "${rect_restore}" "${rect_append}" || true
+  else
+    _print_body_head "${rect_get}"
+    _fail "${base} GET /api/v1/hotwords/rectify (for stateful tests)"
+  fi
+  rm -f "${rect_get}" || true
 
   tmp="$(_tmpfile)"
   code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/transcribe" \
@@ -260,6 +515,7 @@ _test_one_base() {
     -F "with_speaker=false" \
     -F "apply_hotword=true" \
     -F "apply_llm=false" \
+    -F "target_backend=auto" \
   )"
   if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_transcribe_success "${tmp}" >/dev/null 2>&1; then
     _ok "${base} POST /api/v1/transcribe"
@@ -278,6 +534,7 @@ _test_one_base() {
     -F "with_speaker=false" \
     -F "apply_hotword=true" \
     -F "apply_llm=false" \
+    -F "target_backend=auto" \
   )"
   if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_batch_success "${tmp}" >/dev/null 2>&1; then
     _ok "${base} POST /api/v1/transcribe/batch"
@@ -287,6 +544,96 @@ _test_one_base() {
     _fail "${base} POST /api/v1/transcribe/batch"
   fi
   rm -f "${tmp}" || true
+
+  # "视频转写" 端点（前端按钮）— 用音频文件做兼容性测试
+  tmp="$(_tmpfile)"
+  code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/trans/video" \
+    -X POST \
+    -F "file=@${AUDIO}" \
+    -F "with_speaker=false" \
+    -F "apply_hotword=true" \
+    -F "apply_llm=false" \
+    -F "target_backend=auto" \
+  )"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_transcribe_success "${tmp}" >/dev/null 2>&1; then
+    _ok "${base} POST /api/v1/trans/video"
+  else
+    echo "ERROR HTTP ${code}: ${base}/api/v1/trans/video" >&2
+    _print_body_head "${tmp}"
+    _fail "${base} POST /api/v1/trans/video"
+  fi
+  rm -f "${tmp}" || true
+
+  # URL 转写（异步）— 默认跳过，除非提供 URL_AUDIO_URL
+  if [ -n "${URL_AUDIO_URL}" ]; then
+    tmp="$(_tmpfile)"
+    code="$(_curl_to_file_timeout "${TIMEOUT_S}" "${tmp}" "${base}/api/v1/trans/url" \
+      -X POST \
+      -F "audio_url=${URL_AUDIO_URL}" \
+      -F "with_speaker=false" \
+      -F "apply_hotword=true" \
+      -F "apply_llm=false" \
+      -F "target_backend=auto" \
+    )"
+    if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1; then
+      # Extract task_id
+      task_id="$(python3 - "${tmp}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+data=obj.get("data") or {}
+tid=data.get("task_id") if isinstance(data, dict) else None
+print(tid or "")
+PY
+)"
+      if [ -n "${task_id}" ]; then
+        _ok "${base} POST /api/v1/trans/url"
+      else
+        _print_body_head "${tmp}"
+        _fail "${base} POST /api/v1/trans/url (missing task_id)"
+      fi
+    else
+      echo "ERROR HTTP ${code}: ${base}/api/v1/trans/url" >&2
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/trans/url"
+      task_id=""
+    fi
+    rm -f "${tmp}" || true
+
+    if [ -n "${task_id}" ]; then
+      # Poll /api/v1/result until success or error
+      for i in $(seq 1 "${URL_TASK_POLL_RETRIES}"); do
+        tmp="$(_tmpfile)"
+        code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/result" \
+          -X POST \
+          -F "task_id=${task_id}" \
+          -F "delete=false" \
+        )"
+        if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1; then
+          status="$(python3 - "${tmp}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+print(obj.get("status") or "")
+PY
+)"
+          if [ "${status}" = "success" ]; then
+            _ok "${base} POST /api/v1/result (success)"
+            rm -f "${tmp}" || true
+            break
+          fi
+          if [ "${status}" = "error" ]; then
+            _print_body_head "${tmp}"
+            _fail "${base} POST /api/v1/result (error)"
+            rm -f "${tmp}" || true
+            break
+          fi
+        fi
+        rm -f "${tmp}" || true
+        sleep "${URL_TASK_POLL_SLEEP_S}"
+      done
+    fi
+  else
+    echo "SKIP ${base} /api/v1/trans/url (set URL_AUDIO_URL=... to enable)" >&2
+  fi
 }
 
 _test_diarizer() {
@@ -327,6 +674,7 @@ echo "Xiyu smoke test"
 echo "- PORTS=${PORTS}"
 echo "- REMOTE_ASR_PORTS=${REMOTE_ASR_PORTS} (skip=${SKIP_REMOTE_ASR_CHECKS})"
 echo "- AUDIO=${AUDIO}"
+echo "- URL_AUDIO_URL=${URL_AUDIO_URL:-<empty>}"
 echo "- TIMEOUT_S=${TIMEOUT_S}"
 echo "- TRANSCRIBE_TIMEOUT_S=${TRANSCRIBE_TIMEOUT_S}"
 echo "- REMOTE_ASR_TIMEOUT_S=${REMOTE_ASR_TIMEOUT_S} retries=${REMOTE_ASR_READY_RETRIES} sleep=${REMOTE_ASR_READY_SLEEP_S}s"

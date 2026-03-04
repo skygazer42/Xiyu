@@ -76,12 +76,49 @@ class ModelManager:
                 self._backend = self._build_remote_backend("vibevoice")
             elif backend_type == "router":
                 from src.models.backends.router import RouterBackend
+                from src.models.backends.xiyu_proxy import XiyuTranscribeProxyBackend
 
                 short_backend = self._build_backend_for_router(settings.router_short_backend)
                 long_backend = self._build_backend_for_router(settings.router_long_backend)
+
+                # Additional named targets for single-port deployments.
+                # These backends are best-effort; services may not be started.
+                targets: dict[str, ASRBackend] = {
+                    # Remote ASR servers (inside docker network)
+                    "qwen3": self._build_backend_for_router("qwen3"),
+                    "vibevoice": self._build_backend_for_router("vibevoice"),
+                    # Other Xiyu containers (proxy over HTTP)
+                    "pytorch": XiyuTranscribeProxyBackend(
+                        base_url="http://xiyu-pytorch:8000",
+                        timeout_s=600.0,
+                        name="xiyu-pytorch",
+                    ),
+                    "onnx": XiyuTranscribeProxyBackend(
+                        base_url="http://xiyu-onnx:8000",
+                        timeout_s=600.0,
+                        name="xiyu-onnx",
+                    ),
+                    "sensevoice": XiyuTranscribeProxyBackend(
+                        base_url="http://xiyu-sensevoice:8000",
+                        timeout_s=600.0,
+                        name="xiyu-sensevoice",
+                    ),
+                    "gguf": XiyuTranscribeProxyBackend(
+                        base_url="http://xiyu-gguf:8000",
+                        timeout_s=600.0,
+                        name="xiyu-gguf",
+                    ),
+                    "whisper": XiyuTranscribeProxyBackend(
+                        base_url="http://xiyu-whisper:8000",
+                        timeout_s=float(getattr(settings, "whisper_service_timeout_s", 600.0) or 600.0),
+                        name="xiyu-whisper",
+                    ),
+                }
+
                 self._backend = RouterBackend(
                     short_backend=short_backend,
                     long_backend=long_backend,
+                    targets=targets,
                     long_audio_threshold_s=settings.router_long_audio_threshold_s,
                     force_vibevoice_when_with_speaker=settings.router_force_vibevoice_when_with_speaker,
                 )

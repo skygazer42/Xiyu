@@ -55,6 +55,7 @@ const defaultOptions: TranscribeOptions = {
   apply_llm: false,
   llm_role: 'policy_polish_balanced',
   speaker_label_style: 'zh',
+  target_backend: 'auto',
 }
 
 const defaultEnsembleOptions: EnsembleOptions = {

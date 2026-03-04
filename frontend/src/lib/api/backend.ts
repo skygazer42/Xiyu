@@ -1,9 +1,14 @@
 import axios from 'axios'
 import apiClient from './client'
-import type { BackendInfoResponse } from './types'
+import type { BackendInfoResponse, BackendTargetsResponse } from './types'
 
 export async function getBackendInfo(): Promise<BackendInfoResponse> {
   const response = await apiClient.get<BackendInfoResponse>('/api/v1/backend')
+  return response.data
+}
+
+export async function getBackendTargets(): Promise<BackendTargetsResponse> {
+  const response = await apiClient.get<BackendTargetsResponse>('/api/v1/backend/targets')
   return response.data
 }
 

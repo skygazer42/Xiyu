@@ -107,6 +107,7 @@ def _handle_url_transcribe(payload: dict) -> dict:
     apply_llm = payload.get("apply_llm", False)
     llm_role = payload.get("llm_role", "default")
     hotwords = payload.get("hotwords")
+    target_backend = payload.get("target_backend")
     asr_options = payload.get("asr_options")
 
     # 解析 URL 获取文件扩展名
@@ -151,6 +152,7 @@ def _handle_url_transcribe(payload: dict) -> dict:
             llm_role=str(llm_role) if llm_role else "default",
             hotwords=hotwords,
             asr_options=asr_options,
+            target_backend=target_backend,
         )
 
         # Keep the async URL task result schema consistent with the synchronous HTTP
@@ -184,6 +186,10 @@ async def transcribe_from_url(
     apply_hotword: bool = Form(default=True, description="是否应用热词纠错"),
     apply_llm: bool = Form(default=False, description="是否应用 LLM 润色"),
     llm_role: str = Form(default="default", description="LLM 角色"),
+    target_backend: Optional[str] = Form(
+        default=None,
+        description="Router 目标后端（单端口部署专用）：auto/qwen3/vibevoice/pytorch/onnx/sensevoice/gguf/whisper...",
+    ),
     hotwords: Optional[str] = Form(default=None, description="临时热词"),
     asr_options: Optional[str] = Form(default=None, description="ASR options JSON (per-request tuning)"),
 ):
@@ -206,6 +212,7 @@ async def transcribe_from_url(
         "apply_llm": apply_llm,
         "llm_role": llm_role,
         "hotwords": hotwords,
+        "target_backend": target_backend,
         "asr_options": parsed_asr_options,
     })
 
@@ -365,6 +372,10 @@ async def transcribe_video(
     apply_hotword: bool = Form(default=True, description="是否应用热词纠错"),
     apply_llm: bool = Form(default=False, description="是否应用 LLM 润色"),
     llm_role: str = Form(default="default", description="LLM 角色"),
+    target_backend: Optional[str] = Form(
+        default=None,
+        description="Router 目标后端（单端口部署专用）：auto/qwen3/vibevoice/pytorch/onnx/sensevoice/gguf/whisper...",
+    ),
     hotwords: Optional[str] = Form(default=None, description="临时热词"),
     asr_options: Optional[str] = Form(default=None, description="ASR options JSON (per-request tuning)"),
 ):
@@ -392,6 +403,7 @@ async def transcribe_video(
                 llm_role=llm_role,
                 hotwords=hotwords,
                 asr_options=parsed_asr_options,
+                target_backend=target_backend,
             )
 
             return {

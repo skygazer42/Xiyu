@@ -52,6 +52,8 @@ export interface UrlTranscribeRequest {
   apply_hotword?: boolean
   apply_llm?: boolean
   llm_role?: string
+  /** Router 目标后端（单端口部署专用）：auto/qwen3/vibevoice/pytorch/onnx/sensevoice/gguf/whisper... */
+  target_backend?: string
   hotwords?: string
   asr_options?: string
 }
@@ -136,6 +138,19 @@ export interface BackendInfoResponse {
   info: Record<string, unknown>
   capabilities: BackendCapabilities
   speaker_unsupported_behavior: 'error' | 'fallback' | 'ignore'
+}
+
+export interface BackendTargetStatus {
+  key: string
+  ok: boolean
+  info?: Record<string, unknown>
+  error?: string | null
+}
+
+export interface BackendTargetsResponse {
+  code: number
+  backend: string
+  targets: BackendTargetStatus[]
 }
 
 // 全量/Ensemble 接口
@@ -228,6 +243,8 @@ export interface TranscribeOptions {
   llm_role?: SingleLlmRole
   hotwords?: string
   speaker_label_style?: 'numeric' | 'zh'
+  /** Router 目标后端（单端口部署专用）：auto/qwen3/vibevoice/pytorch/onnx/sensevoice/gguf/whisper... */
+  target_backend?: string
 }
 
 // WebSocket 消息类型

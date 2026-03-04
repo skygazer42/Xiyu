@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import { useBackendStore, useTranscriptionStore } from '@/stores'
-import { getBackendInfo, probeBackendInfo } from '@/lib/api'
+import { getBackendInfo, getBackendTargets, probeBackendInfo } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useMemo, useState } from 'react'
 import { Sparkles, Users, BookText, Bot, Server, Braces, ChevronDown } from 'lucide-react'
@@ -42,6 +42,17 @@ const PRESET_BACKENDS: Array<{ label: string; value: string; baseUrl: string }> 
   { label: 'Router (8200)', value: _makePresetBaseUrl(8200), baseUrl: _makePresetBaseUrl(8200) },
 ]
 
+const ROUTER_TARGETS: Array<{ label: string; value: string }> = [
+  { label: '自动 (Router 策略)', value: 'auto' },
+  { label: 'Qwen3 (远程)', value: 'qwen3' },
+  { label: 'VibeVoice (远程)', value: 'vibevoice' },
+  { label: 'PyTorch (内网容器)', value: 'pytorch' },
+  { label: 'ONNX (内网容器)', value: 'onnx' },
+  { label: 'SenseVoice (内网容器)', value: 'sensevoice' },
+  { label: 'GGUF (内网容器)', value: 'gguf' },
+  { label: 'Whisper (内网容器)', value: 'whisper' },
+]
+
 export function TranscribeOptions() {
   const {
     options,
@@ -58,6 +69,7 @@ export function TranscribeOptions() {
   const { baseUrl, setBaseUrl } = useBackendStore()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [backendSelectOpen, setBackendSelectOpen] = useState(false)
+  const [routerTargetSelectOpen, setRouterTargetSelectOpen] = useState(false)
 
   const backendOptions = useMemo(() => {
     if (!baseUrl || PRESET_BACKENDS.some((b) => b.value === baseUrl)) {
@@ -76,6 +88,16 @@ export function TranscribeOptions() {
     queryFn: getBackendInfo,
     retry: false,
     staleTime: 30000,
+  })
+
+  const isRouter = backendInfoQuery.data?.backend === 'router'
+
+  const backendTargetsQuery = useQuery({
+    queryKey: ['backendTargets', baseUrl],
+    queryFn: getBackendTargets,
+    enabled: Boolean(isRouter) && routerTargetSelectOpen,
+    retry: false,
+    staleTime: 0,
   })
 
   const backendProbeQueries = useQueries({
@@ -113,6 +135,46 @@ export function TranscribeOptions() {
   const supportsSpeakerFallback = backendInfoQuery.data?.capabilities.supports_speaker_fallback
   const speakerStrategy = backendInfoQuery.data?.capabilities.speaker_strategy
   const advancedEnabled = advancedAsrOptionsText.trim().length > 0
+
+  const targetStatusByKey = useMemo(() => {
+    const m = new Map<string, { ok: boolean; name?: string; error?: string }>()
+    const targets = backendTargetsQuery.data?.targets
+    if (!Array.isArray(targets)) return m
+
+    targets.forEach((t) => {
+      if (!t || typeof t !== 'object') return
+      const key = String((t as { key?: unknown }).key || '').trim().toLowerCase()
+      if (!key) return
+      const ok = Boolean((t as { ok?: unknown }).ok)
+      const info = (t as { info?: unknown }).info
+      const name =
+        info && typeof info === 'object' && !Array.isArray(info)
+          ? String((info as Record<string, unknown>).name || '')
+          : ''
+      const error = String((t as { error?: unknown }).error || '').trim()
+      m.set(key, { ok, name: name || undefined, error: error || undefined })
+    })
+    return m
+  }, [backendTargetsQuery.data])
+
+  const getTargetProbeLabel = (key: string): string => {
+    if (!routerTargetSelectOpen) return ''
+    if (backendTargetsQuery.isPending) return '探测中'
+    if (backendTargetsQuery.isError) return '不可用'
+    const st = targetStatusByKey.get(key)
+    if (!st) return ''
+    if (st.ok) return st.name ? `可用 · ${st.name}` : '可用'
+    return st.error ? `不可用 · ${st.error}` : '不可用'
+  }
+
+  const getTargetProbeStatus = (key: string): 'ok' | 'loading' | 'error' | 'idle' => {
+    if (!routerTargetSelectOpen) return 'idle'
+    if (backendTargetsQuery.isPending) return 'loading'
+    if (backendTargetsQuery.isError) return 'error'
+    const st = targetStatusByKey.get(key)
+    if (!st) return 'idle'
+    return st.ok ? 'ok' : 'error'
+  }
 
   const applyAsrOptionsTemplate = (template: Record<string, unknown>) => {
     setAdvancedAsrOptionsText(JSON.stringify(template, null, 2))
@@ -244,6 +306,75 @@ export function TranscribeOptions() {
             </p>
           </div>
         </div>
+
+        {/* Router 目标后端（单端口下仍可选模型） */}
+        {isRouter ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <Server className="h-5 w-5 text-muted-foreground" />
+              <div className="flex-1">
+                <Label htmlFor="router-target" className="text-base">目标模型（Router）</Label>
+                <p className="text-sm text-muted-foreground">对外只暴露 1 个端口，但内部按需转发到模型容器</p>
+              </div>
+              {backendTargetsQuery.isPending ? (
+                <Badge variant="outline">探测中</Badge>
+              ) : backendTargetsQuery.isError ? (
+                <Badge variant="outline" className="border-amber-200 text-amber-700 bg-amber-500/5">
+                  未探测
+                </Badge>
+              ) : backendTargetsQuery.isSuccess ? (
+                <Badge variant="outline" className="border-green-200 text-green-700 bg-green-500/5">
+                  可选
+                </Badge>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="router-target">选择模型</Label>
+              <Select
+                value={(options.target_backend || 'auto').toLowerCase()}
+                onOpenChange={setRouterTargetSelectOpen}
+                onValueChange={(value) => setOptions({ target_backend: value })}
+              >
+                <SelectTrigger id="router-target">
+                  <SelectValue placeholder="auto" />
+                </SelectTrigger>
+                <SelectContent>
+                  {!ROUTER_TARGETS.some((t) => t.value === (options.target_backend || 'auto').toLowerCase()) ? (
+                    <SelectItem value={(options.target_backend || 'auto').toLowerCase()}>
+                      自定义: {(options.target_backend || 'auto').toLowerCase()}
+                    </SelectItem>
+                  ) : null}
+                  {ROUTER_TARGETS.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      <span className="flex w-full items-center justify-between gap-2">
+                        <span className="truncate">{t.label}</span>
+                        {routerTargetSelectOpen ? (
+                          <span
+                            className={cn(
+                              'text-xs',
+                              getTargetProbeStatus(t.value) === 'ok'
+                                ? 'text-green-700 dark:text-green-400'
+                                : getTargetProbeStatus(t.value) === 'error'
+                                  ? 'text-red-700 dark:text-red-400'
+                                  : 'text-muted-foreground'
+                            )}
+                          >
+                            {getTargetProbeLabel(t.value)}
+                          </span>
+                        ) : null}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <p className="text-xs text-muted-foreground">
+                建议：`auto` 让 Router 根据「短音频/长音频/说话人」自动路由；也可强制固定到某个模型用于 A/B 对比。
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {/* 说话人识别 */}
         <div className="flex items-center justify-between">

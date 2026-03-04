@@ -407,6 +407,55 @@ class TranscriptionEngine:
         }
         return {k: v for k, v in backend_options.items() if isinstance(k, str) and k not in reserved}
 
+    @staticmethod
+    def _normalize_target_backend(value: object) -> Optional[str]:
+        """Normalize per-request router target backend override.
+
+        This is a router-only feature used by single-port deployments:
+        frontend sends `target_backend=...` to the router, and the router forwards
+        the request to the chosen model container inside the docker network.
+        """
+        if value is None:
+            return None
+        s = str(value).strip()
+        if not s:
+            return None
+        lowered = s.lower()
+        if lowered in ("auto", "default"):
+            return None
+        return lowered
+
+    @staticmethod
+    def _is_router_backend(backend: object) -> bool:
+        try:
+            from src.models.backends.router import RouterBackend
+
+            return isinstance(backend, RouterBackend)
+        except Exception:
+            return False
+
+    def _backend_transcribe(
+        self,
+        backend,
+        *,
+        audio_input,
+        hotwords: Optional[str],
+        with_speaker: bool,
+        target_backend: Optional[str],
+        backend_kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Call backend.transcribe with router target override (best-effort)."""
+        call_kwargs: Dict[str, Any] = dict(backend_kwargs or {})
+        if target_backend and self._is_router_backend(backend):
+            # RouterBackend consumes and strips this key before calling the actual backend.
+            call_kwargs["target_backend"] = target_backend
+        return backend.transcribe(
+            audio_input,
+            hotwords=hotwords,
+            with_speaker=with_speaker,
+            **call_kwargs,
+        )
+
     def _get_request_speaker_options(self, asr_options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Return request-scoped speaker formatting options.
 
@@ -954,6 +1003,10 @@ class TranscriptionEngine:
         # 获取注入热词
         injection_hotwords = self._get_injection_hotwords(hotwords)
 
+        # Router-only: allow per-request backend override without leaking unknown kwargs
+        # into underlying ASR libraries (e.g. FunASR AutoModel.generate).
+        target_backend = self._normalize_target_backend(kwargs.pop("target_backend", None))
+
         # Per-request overrides (do not mutate globals).
         post_processor = self._get_request_post_processor(asr_options)
         effective_backend_kwargs: Dict[str, Any] = {}
@@ -977,6 +1030,7 @@ class TranscriptionEngine:
                     injection_hotwords=injection_hotwords,
                     post_processor=post_processor,
                     effective_backend_kwargs=effective_backend_kwargs,
+                    target_backend=target_backend,
                     speaker_options=speaker_options,
                     apply_hotword=apply_hotword,
                     apply_llm=apply_llm,
@@ -1031,11 +1085,13 @@ class TranscriptionEngine:
         # 使用配置的后端
         if raw_result is None:
             try:
-                raw_result = backend.transcribe(
-                    audio_input,
+                raw_result = self._backend_transcribe(
+                    backend,
+                    audio_input=audio_input,
                     hotwords=injection_hotwords,
                     with_speaker=with_speaker,
-                    **effective_backend_kwargs,
+                    target_backend=target_backend,
+                    backend_kwargs=effective_backend_kwargs,
                 )
             except Exception as e:
                 logger.error(f"ASR transcription failed: {e}")
@@ -1266,6 +1322,10 @@ class TranscriptionEngine:
         # 获取注入热词
         injection_hotwords = self._get_injection_hotwords(hotwords)
 
+        # Router-only: allow per-request backend override without leaking unknown kwargs
+        # into underlying ASR libraries (e.g. FunASR AutoModel.generate).
+        target_backend = self._normalize_target_backend(kwargs.pop("target_backend", None))
+
         # Per-request overrides (do not mutate globals).
         post_processor = self._get_request_post_processor(asr_options)
         effective_backend_kwargs: Dict[str, Any] = {}
@@ -1289,6 +1349,7 @@ class TranscriptionEngine:
                     injection_hotwords=injection_hotwords,
                     post_processor=post_processor,
                     effective_backend_kwargs=effective_backend_kwargs,
+                    target_backend=target_backend,
                     speaker_options=speaker_options,
                     apply_hotword=apply_hotword,
                     apply_llm=apply_llm,
@@ -1324,6 +1385,7 @@ class TranscriptionEngine:
                         injection_hotwords=injection_hotwords,
                         post_processor=post_processor,
                         effective_backend_kwargs=effective_backend_kwargs,
+                        target_backend=target_backend,
                         speaker_options=speaker_options,
                         apply_hotword=apply_hotword,
                         apply_llm=apply_llm,
@@ -1365,11 +1427,13 @@ class TranscriptionEngine:
         # 使用配置的后端
         if raw_result is None:
             try:
-                raw_result = backend.transcribe(
-                    audio_input,
+                raw_result = self._backend_transcribe(
+                    backend,
+                    audio_input=audio_input,
                     hotwords=injection_hotwords,
                     with_speaker=with_speaker,
-                    **effective_backend_kwargs,
+                    target_backend=target_backend,
+                    backend_kwargs=effective_backend_kwargs,
                 )
             except Exception as e:
                 logger.error(f"ASR transcription failed: {e}")
@@ -1567,6 +1631,7 @@ class TranscriptionEngine:
         injection_hotwords: Optional[str],
         post_processor: TextPostProcessor,
         effective_backend_kwargs: Dict[str, Any],
+        target_backend: Optional[str],
         speaker_options: Dict[str, Any],
         apply_hotword: bool,
         apply_llm: bool,
@@ -1698,11 +1763,13 @@ class TranscriptionEngine:
             if not pcm_slice:
                 continue
 
-            raw = backend.transcribe(
-                pcm_slice,
+            raw = self._backend_transcribe(
+                backend,
+                audio_input=pcm_slice,
                 hotwords=injection_hotwords,
                 with_speaker=False,
-                **effective_backend_kwargs,
+                target_backend=target_backend,
+                backend_kwargs=effective_backend_kwargs,
             )
             seg_text = str((raw or {}).get("text", "") or "")
 
@@ -1782,6 +1849,7 @@ class TranscriptionEngine:
         injection_hotwords: Optional[str],
         post_processor: TextPostProcessor,
         effective_backend_kwargs: Dict[str, Any],
+        target_backend: Optional[str],
         speaker_options: Dict[str, Any],
         apply_hotword: bool,
         apply_llm: bool,
@@ -1935,11 +2003,13 @@ class TranscriptionEngine:
                         continue
 
                     pcm_chunk = pcm_turn[start_b:end_b]
-                    raw = backend.transcribe(
-                        pcm_chunk,
+                    raw = self._backend_transcribe(
+                        backend,
+                        audio_input=pcm_chunk,
                         hotwords=injection_hotwords,
                         with_speaker=False,
-                        **effective_backend_kwargs,
+                        target_backend=target_backend,
+                        backend_kwargs=effective_backend_kwargs,
                     )
                     asr_call_count += 1
                     raw_chunk_text = str((raw or {}).get("text", "") or "")
@@ -1948,11 +2018,13 @@ class TranscriptionEngine:
                 if max_turns > 0 and (asr_call_count + 1) > max_turns:
                     return None
 
-                raw = backend.transcribe(
-                    pcm_turn,
+                raw = self._backend_transcribe(
+                    backend,
+                    audio_input=pcm_turn,
                     hotwords=injection_hotwords,
                     with_speaker=False,
-                    **effective_backend_kwargs,
+                    target_backend=target_backend,
+                    backend_kwargs=effective_backend_kwargs,
                 )
                 asr_call_count += 1
                 raw_turn_text = str((raw or {}).get("text", "") or "")
@@ -2195,9 +2267,6 @@ class TranscriptionEngine:
         # Per-request overrides (do not mutate globals).
         chunker = self._get_request_chunker(asr_options)
         post_processor = self._get_request_post_processor(asr_options)
-        effective_backend_kwargs: Dict[str, Any] = {}
-        effective_backend_kwargs.update(self._get_request_backend_kwargs(asr_options))
-        effective_backend_kwargs.update(kwargs)
 
         chunking_options = None
         if isinstance(asr_options, dict):
@@ -2276,6 +2345,14 @@ class TranscriptionEngine:
 
         logger.info(f"Long audio detected ({duration:.1f}s), using chunked transcription")
 
+        # Router-only: allow per-request backend override without leaking unknown kwargs
+        # into underlying ASR libraries (e.g. FunASR AutoModel.generate).
+        target_backend = self._normalize_target_backend(kwargs.pop("target_backend", None))
+
+        effective_backend_kwargs: Dict[str, Any] = {}
+        effective_backend_kwargs.update(self._get_request_backend_kwargs(asr_options))
+        effective_backend_kwargs.update(kwargs)
+
         # Prepare backend once (avoid repeating per-chunk work).
         backend = model_manager.backend
         backend_name = backend.get_info().get("name", "unknown")
@@ -2326,11 +2403,13 @@ class TranscriptionEngine:
                     **effective_backend_kwargs,
                 )
             else:
-                raw_result = backend.transcribe(
-                    chunk_bytes,
+                raw_result = self._backend_transcribe(
+                    backend,
+                    audio_input=chunk_bytes,
                     hotwords=injection_hotwords,
                     with_speaker=with_speaker,
-                    **effective_backend_kwargs,
+                    target_backend=target_backend,
+                    backend_kwargs=effective_backend_kwargs,
                 )
 
             return {
@@ -2354,11 +2433,13 @@ class TranscriptionEngine:
                 from src.core.audio.boundary_reconcile import build_boundary_bridge_results
 
                 def _transcribe_bridge(pcm16le: bytes) -> str:
-                    raw_bridge = backend.transcribe(
-                        pcm16le,
+                    raw_bridge = self._backend_transcribe(
+                        backend,
+                        audio_input=pcm16le,
                         hotwords=injection_hotwords,
                         with_speaker=False,
-                        **effective_backend_kwargs,
+                        target_backend=target_backend,
+                        backend_kwargs=effective_backend_kwargs,
                     )
                     return str(raw_bridge.get("text", "") or "")
 

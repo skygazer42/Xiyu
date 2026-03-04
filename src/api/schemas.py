@@ -112,6 +112,23 @@ class BackendInfoResponse(BaseModel):
     )
 
 
+class BackendTargetStatus(BaseModel):
+    """Router backend target probe status."""
+
+    key: str = Field(..., description="目标后端 key（如 qwen3/vibevoice/pytorch/onnx/...）")
+    ok: bool = Field(..., description="是否可用（探测成功）")
+    info: Dict[str, Any] = Field(default_factory=dict, description="backend.get_info() 元信息（尽量安全/小）")
+    error: Optional[str] = Field(default=None, description="失败原因（可选）")
+
+
+class BackendTargetsResponse(BaseModel):
+    """Backend target list (router-only)."""
+
+    code: int = Field(default=0, description="状态码 (0=成功)")
+    backend: str = Field(..., description="当前实例的 ASR_BACKEND")
+    targets: List[BackendTargetStatus] = Field(default_factory=list, description="Router 可选 target 列表")
+
+
 class EnsembleCandidate(BaseModel):
     """多模型转写候选（用于全量/ensemble 接口）"""
 

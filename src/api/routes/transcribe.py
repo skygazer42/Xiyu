@@ -42,6 +42,12 @@ async def transcribe_audio(
         ),
     ),
     include_srt: bool = Form(default=False, description="是否在响应中包含 SRT 字幕内容"),
+    target_backend: Optional[str] = Form(
+        default=None,
+        description=(
+            "Router 目标后端（单端口部署专用）：auto/qwen3/vibevoice/pytorch/onnx/sensevoice/gguf/whisper..."
+        ),
+    ),
     hotwords: Optional[str] = Form(default=None, description="额外热词 (空格分隔)"),
     asr_options: Optional[str] = Form(default=None, description="ASR options JSON (per-request tuning)"),
 ):
@@ -84,6 +90,7 @@ async def transcribe_audio(
                 llm_role=llm_role,
                 hotwords=hotwords,
                 asr_options=parsed_asr_options,
+                target_backend=target_backend,
             )
 
             # 更新指标
@@ -134,6 +141,12 @@ async def transcribe_batch(
         description=(
             "LLM 角色（单模型润色）。推荐（政务/政策会议）："
             "policy_polish_strict / policy_polish_balanced / policy_polish_aggressive"
+        ),
+    ),
+    target_backend: Optional[str] = Form(
+        default=None,
+        description=(
+            "Router 目标后端（单端口部署专用）：auto/qwen3/vibevoice/pytorch/onnx/sensevoice/gguf/whisper..."
         ),
     ),
     hotwords: Optional[str] = Form(default=None, description="额外热词"),
@@ -188,6 +201,7 @@ async def transcribe_batch(
                         llm_role=llm_role,
                         hotwords=hotwords,
                         asr_options=parsed_asr_options,
+                        target_backend=target_backend,
                     )
 
                     # 更新指标

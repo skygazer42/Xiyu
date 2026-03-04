@@ -590,6 +590,8 @@ export default function TranscribePage() {
       raw_text: item.rawText,
     })
     setResultFilename(item.filename.replace(/\.[^/.]+$/, ''))
+    setSelectedSentence(null)
+    setSelectedIndex(undefined)
     toast.success('已加载历史记录')
   }
 
