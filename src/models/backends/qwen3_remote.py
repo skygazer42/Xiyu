@@ -25,6 +25,30 @@ from src.models.backends.remote_utils import audio_input_to_wav_bytes
 logger = logging.getLogger(__name__)
 
 
+def _strip_qwen3_asr_wrappers(text: str) -> str:
+    """Strip Qwen3-ASR server wrapper markers from transcript text.
+
+    Some Qwen3-ASR server variants return output like:
+      "language Chinese<asr_text>...language Chinese<asr_text>..."
+
+    These markers can appear multiple times (e.g. streaming concatenation).
+    We remove *all* occurrences to keep the transcript clean.
+    """
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    if "<asr_text>" not in s:
+        return s
+
+    import re
+
+    # Remove the common "language XXX<asr_text>" prefix.
+    s = re.sub(r"language\s+[A-Za-z0-9_-]+\s*<asr_text>", "", s, flags=re.IGNORECASE)
+    # Remove any remaining tags.
+    s = s.replace("<asr_text>", "")
+    return s.strip()
+
+
 class Qwen3RemoteBackend(ASRBackend):
     """Call a remote Qwen3-ASR server (audio transcriptions preferred)."""
 
@@ -271,13 +295,7 @@ def _extract_text_from_transcriptions(obj: object) -> str:
             text = obj.get("transcript")
         if text is None:
             text = obj.get("content")
-        s = str(text or "").strip()
-        # Qwen3-ASR server variants may wrap the transcript like:
-        #   "language Chinese<asr_text>...."
-        tag = "<asr_text>"
-        if tag in s:
-            s = s.split(tag, 1)[1].strip()
-        return s
+        return _strip_qwen3_asr_wrappers(str(text or ""))
     return str(obj).strip()
 
 
@@ -294,17 +312,12 @@ def _extract_text_from_chat_completion(obj: object) -> str:
             if isinstance(msg, dict):
                 content = msg.get("content")
                 if content is not None:
-                    s = str(content).strip()
-                    # Qwen3-ASR commonly wraps the transcript with "<asr_text>".
-                    tag = "<asr_text>"
-                    if tag in s:
-                        return s.split(tag, 1)[1].strip()
-                    return s
+                    return _strip_qwen3_asr_wrappers(str(content))
 
     # Fallback: try common alternative keys.
     for k in ("text", "transcript", "content"):
         if k in obj:
-            return str(obj.get(k) or "").strip()
+            return _strip_qwen3_asr_wrappers(str(obj.get(k) or ""))
 
     return ""
 

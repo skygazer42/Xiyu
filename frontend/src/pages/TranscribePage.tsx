@@ -432,7 +432,11 @@ export default function TranscribePage() {
             llmRole: ensembleOptions.llm_role,
           },
         })
-        toast.success(ensembleOptions.apply_llm ? '全量融合完成' : '全量对比完成')
+        if (ensembleOptions.apply_llm && response.llm_used === false) {
+          toast.message('全量完成：多模型已跑完，但 LLM 未实际调用（检查 LLM_ENABLE/网络/API Key）')
+        } else {
+          toast.success(ensembleOptions.apply_llm ? '全量融合完成' : '全量对比完成')
+        }
       } else {
         toast.error(ensembleOptions.apply_llm ? '全量融合失败' : '全量对比失败')
       }

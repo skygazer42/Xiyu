@@ -558,6 +558,123 @@ class TranscriptionEngine:
                 seen[key] = score
         return [(k[0], k[1], v) for k, v in sorted(seen.items(), key=lambda x: -x[1])]
 
+    @staticmethod
+    def _estimate_audio_duration_ms(
+        audio_input: Union[bytes, str, Path],
+        *,
+        sample_rate: int = 16000,
+    ) -> int:
+        """Best-effort estimate audio duration (ms) from common TingWu inputs.
+
+        - bytes: usually PCM16LE 16k mono (API standardized). If it looks like WAV, parse header.
+        - str/Path: if it's a WAV file, parse via stdlib `wave` (no ffmpeg dependency).
+        """
+        try:
+            sr = int(sample_rate) if int(sample_rate) > 0 else 16000
+        except Exception:
+            sr = 16000
+
+        if isinstance(audio_input, (bytes, bytearray)):
+            b = bytes(audio_input)
+            if not b:
+                return 0
+            try:
+                from src.core.audio.pcm import is_wav_bytes
+
+                if is_wav_bytes(b):
+                    import io
+                    import wave
+
+                    with wave.open(io.BytesIO(b), "rb") as wf:
+                        frames = wf.getnframes()
+                        wav_sr = wf.getframerate() or sr
+                        if wav_sr <= 0:
+                            wav_sr = sr
+                        return max(0, int(float(frames) / float(wav_sr) * 1000.0))
+            except Exception:
+                # Fall back to PCM estimation below.
+                pass
+
+            # Assume PCM16LE mono.
+            return max(0, int(float(len(b)) / float(2 * sr) * 1000.0))
+
+        if isinstance(audio_input, (str, Path)):
+            p = Path(audio_input)
+            if p.suffix.lower() != ".wav":
+                return 0
+            try:
+                import wave
+
+                with wave.open(str(p), "rb") as wf:
+                    frames = wf.getnframes()
+                    wav_sr = wf.getframerate() or sr
+                    if wav_sr <= 0:
+                        wav_sr = sr
+                    return max(0, int(float(frames) / float(wav_sr) * 1000.0))
+            except Exception:
+                return 0
+
+        return 0
+
+    @staticmethod
+    def _fallback_sentence_info_from_text(
+        text: str,
+        *,
+        duration_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """Build pseudo sentence_info when backend doesn't provide timestamps.
+
+        This is used for remote/text-only backends (e.g. Qwen3) so the frontend
+        still has a usable timeline/SRT export. Timestamps are approximate:
+        segments are split by major punctuation and assigned time proportionally
+        to character length.
+        """
+        t = str(text or "").strip()
+        if not t:
+            return []
+
+        dur = int(duration_ms) if isinstance(duration_ms, int) else 0
+        if dur < 0:
+            dur = 0
+
+        import re
+
+        # Split by sentence-ending punctuation (keep punctuation in the segment).
+        parts = [p.strip() for p in re.split(r"(?<=[。！？!?])\s*", t) if p and p.strip()]
+        if not parts:
+            parts = [t]
+
+        def _seg_len(s: str) -> int:
+            # Length excluding whitespace for more stable proportional allocation.
+            x = re.sub(r"\s+", "", s)
+            return max(1, len(x))
+
+        lens = [_seg_len(p) for p in parts]
+        total = sum(lens) or 1
+
+        out: List[Dict[str, Any]] = []
+        cursor = 0
+        acc = 0
+        for i, p in enumerate(parts):
+            seg_len = lens[i]
+            if i == len(parts) - 1:
+                end = dur
+            else:
+                end = int(round(float(acc + seg_len) / float(total) * float(dur)))
+            if end < cursor:
+                end = cursor
+            out.append(
+                {
+                    "text": p,
+                    "start": cursor,
+                    "end": end,
+                }
+            )
+            cursor = end
+            acc += seg_len
+
+        return out
+
     async def _apply_llm_polish(
         self,
         text: str,
@@ -830,6 +947,10 @@ class TranscriptionEngine:
         # 获取后端
         backend = model_manager.backend
 
+        # Respect global enable switch (keep consistent with ensemble behavior).
+        if apply_llm and not bool(getattr(settings, "llm_enable", False)):
+            apply_llm = False
+
         # 获取注入热词
         injection_hotwords = self._get_injection_hotwords(hotwords)
 
@@ -924,6 +1045,17 @@ class TranscriptionEngine:
         text = raw_result.get("text", "")
         sentence_info = raw_result.get("sentence_info", [])
 
+        # Some remote/text-only backends don't return sentence timestamps.
+        # Build best-effort pseudo sentences so the frontend timeline/SRT exports still work.
+        if (not sentence_info) and text:
+            try:
+                duration_ms = self._estimate_audio_duration_ms(audio_input, sample_rate=16000)
+                if duration_ms > 0:
+                    sentence_info = self._fallback_sentence_info_from_text(text, duration_ms=duration_ms)
+            except Exception:
+                # Never break transcription on a UI-only enhancement.
+                pass
+
         # 置信度过滤
         if settings.confidence_threshold > 0:
             sentence_info = self._filter_low_confidence(
@@ -946,35 +1078,6 @@ class TranscriptionEngine:
         # 去重相似词候选
         all_similars = self._dedupe_similars(all_similars)
 
-        # LLM 润色 - 传入相似词候选
-        if apply_llm:
-            try:
-                if settings.llm_fulltext_enable:
-                    text = asyncio.get_event_loop().run_until_complete(
-                        self._apply_llm_fulltext_polish(
-                            text,
-                            max_chars=settings.llm_fulltext_max_chars,
-                            similarity_candidates=all_similars
-                        )
-                    )
-                else:
-                    text = asyncio.get_event_loop().run_until_complete(
-                        self._apply_llm_polish(text, role=llm_role, similarity_candidates=all_similars)
-                    )
-            except RuntimeError:
-                if settings.llm_fulltext_enable:
-                    text = asyncio.run(
-                        self._apply_llm_fulltext_polish(
-                            text,
-                            max_chars=settings.llm_fulltext_max_chars,
-                            similarity_candidates=all_similars
-                        )
-                    )
-                else:
-                    text = asyncio.run(
-                        self._apply_llm_polish(text, role=llm_role, similarity_candidates=all_similars)
-                    )
-
         # 说话人标注
         speaker_options = self._get_request_speaker_options(asr_options) if with_speaker else {}
         speaker_labeler = self.speaker_labeler
@@ -985,6 +1088,101 @@ class TranscriptionEngine:
 
         if with_speaker and sentence_info:
             sentence_info = speaker_labeler.label_speakers(sentence_info)
+
+        # LLM 润色（best-effort）：
+        # - 非 speaker：润色 `text`（保持 sentence timestamps）
+        # - speaker：按 speaker turns 润色，确保 UI 的 turns/transcript 体现 LLM 结果
+        if apply_llm and bool(getattr(settings, "llm_enable", False)):
+            if with_speaker and sentence_info:
+                try:
+                    if bool(speaker_options.get("turn_merge_enable", True)):
+                        speaker_turns = build_speaker_turns(
+                            sentence_info,
+                            gap_ms=int(speaker_options.get("turn_merge_gap_ms", settings.speaker_turn_merge_gap_ms)),
+                            min_chars=int(
+                                speaker_options.get("turn_merge_min_chars", settings.speaker_turn_merge_min_chars)
+                            ),
+                        )
+                    else:
+                        min_chars = int(
+                            speaker_options.get("turn_merge_min_chars", settings.speaker_turn_merge_min_chars)
+                        )
+                        speaker_turns = [
+                            {
+                                "speaker": s.get("speaker"),
+                                "speaker_id": s.get("speaker_id"),
+                                "start": s.get("start", 0),
+                                "end": s.get("end", 0),
+                                "text": s.get("text", ""),
+                                "sentence_count": 1,
+                            }
+                            for s in sentence_info
+                            if len(str(s.get("text", "")).strip()) >= min_chars
+                        ]
+
+                    # Apply LLM polish per turn with small context window.
+                    try:
+                        ctx_n = int(getattr(settings, "llm_context_sentences", 1) or 0)
+                    except Exception:
+                        ctx_n = 1
+                    if ctx_n < 0:
+                        ctx_n = 0
+
+                    try:
+                        coro = self._apply_llm_polish_with_context(
+                            speaker_turns,
+                            role=llm_role,
+                            context_sentences=ctx_n,
+                            similarity_candidates=all_similars,
+                        )
+                        try:
+                            speaker_turns = asyncio.get_event_loop().run_until_complete(coro)
+                        except RuntimeError:
+                            speaker_turns = asyncio.run(coro)
+                    except Exception as e:
+                        logger.warning("LLM polish for speaker turns failed (ignored): %s", e)
+
+                    out_sentences = [
+                        {
+                            "text": str(t.get("text") or ""),
+                            "start": int(t.get("start") or 0),
+                            "end": int(t.get("end") or 0),
+                            "speaker": t.get("speaker"),
+                            "speaker_id": t.get("speaker_id"),
+                        }
+                        for t in speaker_turns
+                    ]
+                    transcript = speaker_labeler.format_transcript(speaker_turns or out_sentences, include_timestamp=True)
+                    text_out = "\n".join(str(t.get("text") or "") for t in speaker_turns).strip() or text
+
+                    return {
+                        "text": text_out,
+                        "text_accu": None,
+                        "sentences": out_sentences,
+                        "speaker_turns": speaker_turns,
+                        "transcript": transcript,
+                        "raw_text": raw_result.get("text", ""),
+                    }
+                except Exception as e:
+                    logger.warning("LLM speaker-turn polish flow failed (ignored): %s", e)
+
+            if text:
+                try:
+                    if settings.llm_fulltext_enable:
+                        coro = self._apply_llm_fulltext_polish(
+                            text,
+                            max_chars=settings.llm_fulltext_max_chars,
+                            similarity_candidates=all_similars,
+                        )
+                    else:
+                        coro = self._apply_llm_polish(text, role=llm_role, similarity_candidates=all_similars)
+
+                    try:
+                        text = asyncio.get_event_loop().run_until_complete(coro)
+                    except RuntimeError:
+                        text = asyncio.run(coro)
+                except Exception as e:
+                    logger.warning("LLM polish failed (ignored): %s", e)
 
         # 构建返回结果
         result = {
@@ -1060,6 +1258,10 @@ class TranscriptionEngine:
         """
         # 获取后端
         backend = model_manager.backend
+
+        # Respect global enable switch (keep consistent with ensemble behavior).
+        if apply_llm and not bool(getattr(settings, "llm_enable", False)):
+            apply_llm = False
 
         # 获取注入热词
         injection_hotwords = self._get_injection_hotwords(hotwords)
@@ -1177,6 +1379,17 @@ class TranscriptionEngine:
         text = raw_result.get("text", "")
         sentence_info = raw_result.get("sentence_info", [])
 
+        # Some remote/text-only backends don't return sentence timestamps.
+        # Build best-effort pseudo sentences so the frontend timeline/SRT exports still work.
+        if (not sentence_info) and text:
+            try:
+                duration_ms = self._estimate_audio_duration_ms(audio_input, sample_rate=16000)
+                if duration_ms > 0:
+                    sentence_info = self._fallback_sentence_info_from_text(text, duration_ms=duration_ms)
+            except Exception:
+                # Never break transcription on a UI-only enhancement.
+                pass
+
         # 置信度过滤
         if settings.confidence_threshold > 0:
             sentence_info = self._filter_low_confidence(
@@ -1198,19 +1411,6 @@ class TranscriptionEngine:
         # 去重相似词候选
         all_similars = self._dedupe_similars(all_similars)
 
-        # LLM 润色（异步）- 传入相似词候选
-        if apply_llm:
-            if settings.llm_fulltext_enable:
-                text = await self._apply_llm_fulltext_polish(
-                    text,
-                    max_chars=settings.llm_fulltext_max_chars,
-                    similarity_candidates=all_similars
-                )
-            else:
-                text = await self._apply_llm_polish(
-                    text, role=llm_role, similarity_candidates=all_similars
-                )
-
         # 说话人标注
         speaker_options = self._get_request_speaker_options(asr_options) if with_speaker else {}
         speaker_labeler = self.speaker_labeler
@@ -1221,6 +1421,91 @@ class TranscriptionEngine:
 
         if with_speaker and sentence_info:
             sentence_info = speaker_labeler.label_speakers(sentence_info)
+
+        # LLM 润色（best-effort）：
+        # - 非 speaker：润色 `text`（保持 sentence timestamps）
+        # - speaker：按 speaker turns 润色，确保 UI 的 turns/transcript 体现 LLM 结果
+        if apply_llm and bool(getattr(settings, "llm_enable", False)):
+            if with_speaker and sentence_info:
+                try:
+                    if bool(speaker_options.get("turn_merge_enable", True)):
+                        speaker_turns = build_speaker_turns(
+                            sentence_info,
+                            gap_ms=int(speaker_options.get("turn_merge_gap_ms", settings.speaker_turn_merge_gap_ms)),
+                            min_chars=int(
+                                speaker_options.get("turn_merge_min_chars", settings.speaker_turn_merge_min_chars)
+                            ),
+                        )
+                    else:
+                        min_chars = int(
+                            speaker_options.get("turn_merge_min_chars", settings.speaker_turn_merge_min_chars)
+                        )
+                        speaker_turns = [
+                            {
+                                "speaker": s.get("speaker"),
+                                "speaker_id": s.get("speaker_id"),
+                                "start": s.get("start", 0),
+                                "end": s.get("end", 0),
+                                "text": s.get("text", ""),
+                                "sentence_count": 1,
+                            }
+                            for s in sentence_info
+                            if len(str(s.get("text", "")).strip()) >= min_chars
+                        ]
+
+                    try:
+                        ctx_n = int(getattr(settings, "llm_context_sentences", 1) or 0)
+                    except Exception:
+                        ctx_n = 1
+                    if ctx_n < 0:
+                        ctx_n = 0
+
+                    try:
+                        speaker_turns = await self._apply_llm_polish_with_context(
+                            speaker_turns,
+                            role=llm_role,
+                            context_sentences=ctx_n,
+                            similarity_candidates=all_similars,
+                        )
+                    except Exception as e:
+                        logger.warning("LLM polish for speaker turns failed (ignored): %s", e)
+
+                    out_sentences = [
+                        {
+                            "text": str(t.get("text") or ""),
+                            "start": int(t.get("start") or 0),
+                            "end": int(t.get("end") or 0),
+                            "speaker": t.get("speaker"),
+                            "speaker_id": t.get("speaker_id"),
+                        }
+                        for t in speaker_turns
+                    ]
+                    transcript = speaker_labeler.format_transcript(speaker_turns or out_sentences, include_timestamp=True)
+                    text_out = "\n".join(str(t.get("text") or "") for t in speaker_turns).strip() or text
+
+                    return {
+                        "text": text_out,
+                        "text_accu": None,
+                        "sentences": out_sentences,
+                        "speaker_turns": speaker_turns,
+                        "transcript": transcript,
+                        "raw_text": raw_result.get("text", ""),
+                    }
+                except Exception as e:
+                    logger.warning("LLM speaker-turn polish flow failed (ignored): %s", e)
+
+            if text:
+                try:
+                    if settings.llm_fulltext_enable:
+                        text = await self._apply_llm_fulltext_polish(
+                            text,
+                            max_chars=settings.llm_fulltext_max_chars,
+                            similarity_candidates=all_similars,
+                        )
+                    else:
+                        text = await self._apply_llm_polish(text, role=llm_role, similarity_candidates=all_similars)
+                except Exception as e:
+                    logger.warning("LLM polish failed (ignored): %s", e)
 
         # 构建返回结果
         result = {
@@ -1903,6 +2188,10 @@ class TranscriptionEngine:
         # for backend compatibility (remote backends require bytes, not numpy arrays).
         audio_pcm_bytes: Optional[bytes] = None
 
+        # Respect global enable switch (keep consistent with ensemble behavior).
+        if apply_llm and not bool(getattr(settings, "llm_enable", False)):
+            apply_llm = False
+
         # Per-request overrides (do not mutate globals).
         chunker = self._get_request_chunker(asr_options)
         post_processor = self._get_request_post_processor(asr_options)
@@ -2097,6 +2386,17 @@ class TranscriptionEngine:
         raw_text_accu = merged.get("text_accu", "") or ""
         sentence_info = merged.get("sentences", [])
 
+        # Some remote/text-only backends don't return sentence timestamps.
+        # For long-audio chunking this can result in empty timeline/SRT exports.
+        if (not sentence_info) and (raw_text_accu or raw_text):
+            try:
+                duration_ms = max(0, int(float(duration) * 1000.0))
+                if duration_ms > 0:
+                    base_text = raw_text_accu or raw_text
+                    sentence_info = self._fallback_sentence_info_from_text(base_text, duration_ms=duration_ms)
+            except Exception:
+                pass
+
         text = raw_text
         text_accu = raw_text_accu
 
@@ -2125,35 +2425,6 @@ class TranscriptionEngine:
         # 去重相似词候选
         all_similars = self._dedupe_similars(all_similars)
 
-        # 全文 LLM 润色 - 传入相似词候选
-        if apply_llm and text:
-            try:
-                if settings.llm_fulltext_enable:
-                    text = asyncio.get_event_loop().run_until_complete(
-                        self._apply_llm_fulltext_polish(
-                            text,
-                            max_chars=settings.llm_fulltext_max_chars,
-                            similarity_candidates=all_similars
-                        )
-                    )
-                else:
-                    text = asyncio.get_event_loop().run_until_complete(
-                        self._apply_llm_polish(text, role=llm_role, similarity_candidates=all_similars)
-                    )
-            except RuntimeError:
-                if settings.llm_fulltext_enable:
-                    text = asyncio.run(
-                        self._apply_llm_fulltext_polish(
-                            text,
-                            max_chars=settings.llm_fulltext_max_chars,
-                            similarity_candidates=all_similars
-                        )
-                    )
-                else:
-                    text = asyncio.run(
-                        self._apply_llm_polish(text, role=llm_role, similarity_candidates=all_similars)
-                    )
-
         # 说话人标注
         speaker_options = self._get_request_speaker_options(asr_options) if with_speaker else {}
         speaker_labeler = self.speaker_labeler
@@ -2164,6 +2435,110 @@ class TranscriptionEngine:
 
         if with_speaker and sentence_info:
             sentence_info = speaker_labeler.label_speakers(sentence_info)
+
+        # LLM 润色（best-effort）：
+        # - speaker：按 speaker turns 润色，确保 UI 的 turns/transcript 体现 LLM 结果
+        # - 非 speaker：优先润色 text_accu（前端默认更偏好它）
+        if apply_llm and bool(getattr(settings, "llm_enable", False)):
+            if with_speaker and sentence_info:
+                try:
+                    if bool(speaker_options.get("turn_merge_enable", True)):
+                        speaker_turns = build_speaker_turns(
+                            sentence_info,
+                            gap_ms=int(speaker_options.get("turn_merge_gap_ms", settings.speaker_turn_merge_gap_ms)),
+                            min_chars=int(
+                                speaker_options.get("turn_merge_min_chars", settings.speaker_turn_merge_min_chars)
+                            ),
+                        )
+                    else:
+                        min_chars = int(
+                            speaker_options.get("turn_merge_min_chars", settings.speaker_turn_merge_min_chars)
+                        )
+                        speaker_turns = [
+                            {
+                                "speaker": s.get("speaker"),
+                                "speaker_id": s.get("speaker_id"),
+                                "start": s.get("start", 0),
+                                "end": s.get("end", 0),
+                                "text": s.get("text", ""),
+                                "sentence_count": 1,
+                            }
+                            for s in sentence_info
+                            if len(str(s.get("text", "")).strip()) >= min_chars
+                        ]
+
+                    try:
+                        ctx_n = int(getattr(settings, "llm_context_sentences", 1) or 0)
+                    except Exception:
+                        ctx_n = 1
+                    if ctx_n < 0:
+                        ctx_n = 0
+
+                    try:
+                        coro = self._apply_llm_polish_with_context(
+                            speaker_turns,
+                            role=llm_role,
+                            context_sentences=ctx_n,
+                            similarity_candidates=all_similars,
+                        )
+                        try:
+                            speaker_turns = asyncio.get_event_loop().run_until_complete(coro)
+                        except RuntimeError:
+                            speaker_turns = asyncio.run(coro)
+                    except Exception as e:
+                        logger.warning("LLM polish for speaker turns failed (ignored): %s", e)
+
+                    out_sentences = [
+                        {
+                            "text": str(t.get("text") or ""),
+                            "start": int(t.get("start") or 0),
+                            "end": int(t.get("end") or 0),
+                            "speaker": t.get("speaker"),
+                            "speaker_id": t.get("speaker_id"),
+                        }
+                        for t in speaker_turns
+                    ]
+                    transcript = speaker_labeler.format_transcript(speaker_turns or out_sentences, include_timestamp=True)
+                    text_out = "\n".join(str(t.get("text") or "") for t in speaker_turns).strip() or text
+
+                    result = {
+                        "text": text_out,
+                        "text_accu": text_accu if text_accu else None,
+                        "sentences": out_sentences,
+                        "raw_text": raw_text,
+                        "duration": duration,
+                        "chunks": len(chunks),
+                        "speaker_turns": speaker_turns,
+                        "transcript": transcript,
+                    }
+                    logger.info(f"Long audio transcription completed: {len(chunks)} chunks, {duration:.1f}s")
+                    return result
+                except Exception as e:
+                    logger.warning("LLM speaker-turn polish flow failed (ignored): %s", e)
+
+            target = text_accu if text_accu else text
+            if target:
+                try:
+                    if settings.llm_fulltext_enable:
+                        coro = self._apply_llm_fulltext_polish(
+                            target,
+                            max_chars=settings.llm_fulltext_max_chars,
+                            similarity_candidates=all_similars,
+                        )
+                    else:
+                        coro = self._apply_llm_polish(target, role=llm_role, similarity_candidates=all_similars)
+
+                    try:
+                        polished = asyncio.get_event_loop().run_until_complete(coro)
+                    except RuntimeError:
+                        polished = asyncio.run(coro)
+
+                    if polished:
+                        text = polished
+                        if text_accu:
+                            text_accu = polished
+                except Exception as e:
+                    logger.warning("LLM polish failed (ignored): %s", e)
 
         result = {
             "text": text,

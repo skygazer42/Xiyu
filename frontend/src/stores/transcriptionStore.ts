@@ -54,7 +54,7 @@ const defaultOptions: TranscribeOptions = {
   apply_hotword: true,
   apply_llm: false,
   llm_role: 'policy_polish_balanced',
-  speaker_label_style: 'numeric',
+  speaker_label_style: 'zh',
 }
 
 const defaultEnsembleOptions: EnsembleOptions = {
