@@ -10,7 +10,7 @@
 set -e
 
 COMPOSE_FILE="docker-compose.benchmark.yml"
-IMAGE_NAME="tingwu-benchmark:latest"
+IMAGE_NAME="xiyu-benchmark:latest"
 BENCHMARK_DIR="data/benchmark"
 
 # 确保 benchmark 数据目录存在

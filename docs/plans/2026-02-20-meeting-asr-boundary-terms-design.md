@@ -1,7 +1,7 @@
 # Meeting ASR Accuracy — Boundary Stability (A) + Proper Nouns/Acronyms (D) — Design
 
 **Date:** 2026-02-20  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
 **Primary goal:** improve *final* meeting/video transcription accuracy for:
 
 - **A. 边界漏字/断词** (chunk/turn boundaries)
@@ -13,13 +13,13 @@ This design assumes a common “turn-taking meeting” pattern (speakers mostly 
 
 ## Current state (already in repo)
 
-TingWu already has:
+Xiyu already has:
 
 1) **Multi-backend deployment** (per-port, frontend selects Base URL):
-   - `docker-compose.models.yml` provides per-model TingWu containers (pytorch/onnx/sensevoice/gguf/whisper/qwen3/…).
+   - `docker-compose.models.yml` provides per-model Xiyu containers (pytorch/onnx/sensevoice/gguf/whisper/qwen3/…).
 
 2) **External diarizer strategy** (pyannote service):
-   - When `with_speaker=true` and `SPEAKER_EXTERNAL_DIARIZER_ENABLE=true`, TingWu calls `tingwu-diarizer`,
+   - When `with_speaker=true` and `SPEAKER_EXTERNAL_DIARIZER_ENABLE=true`, Xiyu calls `xiyu-diarizer`,
      then slices PCM16LE by diarizer turns and transcribes each slice with the selected backend.
    - Output includes `speaker_turns` and numeric labels (`说话人1/2/3…`) when requested.
 
@@ -38,7 +38,7 @@ TingWu already has:
 
 ### Problem A — Boundary word loss / truncation in meeting mode
 
-When using external diarizer, TingWu currently needs to enforce a “max turn duration” (to avoid remote backend timeouts).
+When using external diarizer, Xiyu currently needs to enforce a “max turn duration” (to avoid remote backend timeouts).
 The existing strategy can create **hard time splits** inside a speaker turn with *no overlap merge*.
 
 This causes the exact failure mode the user reports:
@@ -55,7 +55,7 @@ Two main sub-problems:
 
 2) Acronyms are common in meetings:
    - `A I`, `V S Code`, `G P T 4`, `K 8 s` …
-   TingWu already has an optional acronym merge postprocess step, but it can be improved
+   Xiyu already has an optional acronym merge postprocess step, but it can be improved
    (especially letter+digit sequences).
 
 ---
@@ -158,4 +158,3 @@ Prioritize unit tests and mock-based integration tests:
   - Ensure overlap merge removes duplication.
 - API tests for new context hotwords endpoints.
 - Postprocess tests for acronym merge (ensure no false merges on normal Chinese text).
-

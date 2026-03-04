@@ -106,7 +106,7 @@ class ModelManager:
 
         Router may want to route to:
         - remote ASR servers (qwen3/vibevoice)
-        - a local whisper model OR a proxied TingWu whisper service
+        - a local whisper model OR a proxied Xiyu whisper service
         """
         bt = str(backend_type or "").strip().lower()
 
@@ -116,12 +116,12 @@ class ModelManager:
         if bt == "whisper":
             base_url = str(getattr(settings, "whisper_service_base_url", "") or "").strip().rstrip("/")
             if base_url:
-                from src.models.backends.tingwu_proxy import TingWuTranscribeProxyBackend
+                from src.models.backends.xiyu_proxy import XiyuTranscribeProxyBackend
 
-                return TingWuTranscribeProxyBackend(
+                return XiyuTranscribeProxyBackend(
                     base_url=base_url,
                     timeout_s=float(getattr(settings, "whisper_service_timeout_s", 600.0) or 600.0),
-                    name="tingwu-whisper-proxy",
+                    name="xiyu-whisper-proxy",
                 )
 
             # Fallback: load Whisper weights locally in this process.

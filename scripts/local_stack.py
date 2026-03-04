@@ -73,7 +73,7 @@ def build_meeting_specs(root: Path, host: str) -> list[ServiceSpec]:
     pytorch_port = _env_int("PORT_PYTORCH", 8101)
     diarizer_port = _env_int("DIARIZER_PORT", 8300)
 
-    tingwu_python = _env_str("TINGWU_PYTHON", sys.executable)
+    xiyu_python = _env_str("XIYU_PYTHON", sys.executable)
     diarizer_python = _env_str("DIARIZER_PYTHON", sys.executable)
 
     diarizer = ServiceSpec(
@@ -93,7 +93,7 @@ def build_meeting_specs(root: Path, host: str) -> list[ServiceSpec]:
         name="pytorch",
         host=host,
         port=pytorch_port,
-        python=tingwu_python,
+        python=xiyu_python,
         module="src.main",
         extra_env={
             "ASR_BACKEND": "pytorch",
@@ -246,7 +246,7 @@ def _tail_lines(path: Path, n: int) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Local multi-process launcher for TingWu")
+    parser = argparse.ArgumentParser(description="Local multi-process launcher for Xiyu")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     start = sub.add_parser("start", help="Start local services")

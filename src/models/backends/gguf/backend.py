@@ -1,6 +1,6 @@
 """GGUF 后端主实现
 
-移植自 CapsWriter-Offline，封装为 TingWu ASRBackend 接口。
+移植自 CapsWriter-Offline，封装为 Xiyu ASRBackend 接口。
 """
 
 import os
@@ -550,7 +550,7 @@ class GGUFBackend(ASRBackend):
         # 构建句子信息
         sentence_info = []
         if aligned:
-            # align_timestamps returns seconds; TingWu API schema expects ms integers.
+            # align_timestamps returns seconds; Xiyu API schema expects ms integers.
             try:
                 start_s = float(aligned[0].get("start", 0.0) or 0.0)
             except Exception:
@@ -591,7 +591,7 @@ class GGUFBackend(ASRBackend):
         if isinstance(audio_input, (bytes, bytearray)):
             data = bytes(audio_input)
 
-            # TingWu's HTTP layer uses raw PCM16LE (16kHz, mono) bytes.
+            # Xiyu's HTTP layer uses raw PCM16LE (16kHz, mono) bytes.
             # Keep compatibility with WAV container bytes too.
             is_wav = len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WAVE"
             if is_wav:

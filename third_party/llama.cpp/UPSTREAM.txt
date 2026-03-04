@@ -4,5 +4,5 @@ Vendored at: 2026-02-26
 
 Notes:
 - This is a minimal source snapshot used to build llama.cpp shared libraries
-  for TingWu's GGUF backend (libllama.so / libggml.so / libggml-base.so).
+  for Xiyu's GGUF backend (libllama.so / libggml.so / libggml-base.so).
 - The upstream project is MIT licensed; see LICENSE in this directory.

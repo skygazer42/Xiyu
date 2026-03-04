@@ -1,5 +1,5 @@
 # GGUF 后端 Dockerfile
-# 用于 TingWu 的 gguf ASR 后端 (src/models/backends/gguf)。
+# 用于 Xiyu 的 gguf ASR 后端 (src/models/backends/gguf)。
 #
 # 说明:
 # - GGUF 后端需要额外依赖: onnxruntime + gguf

@@ -1,7 +1,7 @@
 """Multi-backend (all-model) transcription + LLM fusion.
 
-This module is intended to run inside the Docker Compose multi-model network:
-- It calls other TingWu containers via HTTP (service names).
+This module is intended to run inside a Docker Compose multi-model network:
+- It calls other Xiyu containers via HTTP (service names).
 - It selects one "base" backend to produce speaker turns (with_speaker=true).
 - It runs all other backends for reference (with_speaker=false).
 - It asks an LLM to polish the base speaker turns using multi-ASR references.
@@ -29,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_DOCKER_TARGETS: Dict[str, str] = {
-    "pytorch": "http://tingwu-pytorch:8000",
-    "onnx": "http://tingwu-onnx:8000",
-    "sensevoice": "http://tingwu-sensevoice:8000",
-    "gguf": "http://tingwu-gguf:8000",
-    "whisper": "http://tingwu-whisper:8000",
-    "qwen3": "http://tingwu-qwen3:8000",
-    "vibevoice": "http://tingwu-vibevoice:8000",
+    "pytorch": "http://xiyu-pytorch:8000",
+    "onnx": "http://xiyu-onnx:8000",
+    "sensevoice": "http://xiyu-sensevoice:8000",
+    "gguf": "http://xiyu-gguf:8000",
+    "whisper": "http://xiyu-whisper:8000",
+    "qwen3": "http://xiyu-qwen3:8000",
+    "vibevoice": "http://xiyu-vibevoice:8000",
 }
 
 
@@ -181,7 +181,7 @@ async def _llm_fix_json_blob(blob: str) -> Optional[str]:
 
 
 def _clean_text_for_llm(obj: Dict[str, Any]) -> str:
-    """Normalize TingWu response to a clean reference text for LLM."""
+    """Normalize Xiyu response to a clean reference text for LLM."""
     # Prefer structured fields to avoid backend quirks (e.g., VibeVoice embedding JSON in `text`).
     speaker_turns = obj.get("speaker_turns")
     if isinstance(speaker_turns, list) and speaker_turns:
@@ -303,7 +303,7 @@ class CandidateResult:
     error: Optional[str] = None
 
 
-async def _call_tingwu_transcribe(
+async def _call_xiyu_transcribe(
     client: httpx.AsyncClient,
     *,
     base_url: str,
@@ -597,7 +597,7 @@ async def transcribe_all_models(
             want_speaker = bool(with_speaker) and (name == base_backend)
             try:
                 async with sem:
-                    http_status, obj = await _call_tingwu_transcribe(
+                    http_status, obj = await _call_xiyu_transcribe(
                         client,
                         base_url=base_url,
                         file_bytes=file_bytes,
@@ -621,7 +621,7 @@ async def transcribe_all_models(
                     elapsed_ms=_now_ms() - t0,
                     result_obj=obj if isinstance(obj, dict) else None,
                     cleaned_text=cleaned,
-                    error=None if ok else f"TingWu code={code!r}",
+                    error=None if ok else f"Xiyu code={code!r}",
                 )
             except Exception as e:
                 return CandidateResult(

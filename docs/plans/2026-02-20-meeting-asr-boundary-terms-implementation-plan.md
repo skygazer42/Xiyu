@@ -4,7 +4,7 @@
 
 **Goal:** Improve meeting/video transcription *final text accuracy* by fixing diarized-turn boundary issues (A) and improving proper-noun/acronym handling (D), while keeping speaker separation stable (`说话人1/2/3…`).
 
-**Architecture:** When `with_speaker=true` and `SPEAKER_EXTERNAL_DIARIZER_ENABLE=true`, TingWu uses the external diarizer to produce speaker turns. For long turns, TingWu will **chunk داخل the turn with overlap** and then **merge chunk transcripts by text** (`merge_by_text`) before applying hotword/rule/postprocess corrections. Context hotwords become first-class via dedicated API + frontend UI.
+**Architecture:** When `with_speaker=true` and `SPEAKER_EXTERNAL_DIARIZER_ENABLE=true`, Xiyu uses the external diarizer to produce speaker turns. For long turns, Xiyu will **chunk داخل the turn with overlap** and then **merge chunk transcripts by text** (`merge_by_text`) before applying hotword/rule/postprocess corrections. Context hotwords become first-class via dedicated API + frontend UI.
 
 **Tech Stack:** Python (FastAPI), `AudioChunker`, `merge_by_text`, React (frontend), TanStack Query.
 
@@ -18,7 +18,7 @@ Meeting ASR projects typically converge on the same primitives:
 - diarization as a separate service (pyannote) when the ASR model doesn’t output speakers
 - “prompt/hotwords/context” as the safest lever for proper nouns
 
-We already have these primitives in TingWu; this plan wires them into the **external diarizer path** and exposes **context hotwords** properly.
+We already have these primitives in Xiyu; this plan wires them into the **external diarizer path** and exposes **context hotwords** properly.
 
 ---
 
@@ -625,4 +625,3 @@ Two execution options:
 2. **Parallel Session (separate)** — open new session with `superpowers:executing-plans` and run task-by-task
 
 Pick one and I’ll start executing.
-

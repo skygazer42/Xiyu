@@ -1,7 +1,7 @@
 """Backend info API (capabilities discovery).
 
 Used by the frontend for multi-container / multi-port deployments to probe:
-- which backend is configured for this TingWu instance
+- which backend is configured for this Xiyu instance
 - whether speaker diarization is supported
 """
 

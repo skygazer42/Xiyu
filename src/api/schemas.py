@@ -119,7 +119,7 @@ class EnsembleCandidate(BaseModel):
     base_url: str = Field(..., description="候选后端 base url（容器内可用）")
     success: bool = Field(default=True, description="是否成功")
     http_status: Optional[int] = Field(default=None, description="HTTP 状态码（如可用）")
-    code: Optional[int] = Field(default=None, description="TingWu code 字段（如可用）")
+    code: Optional[int] = Field(default=None, description="Xiyu code 字段（如可用）")
     elapsed_ms: Optional[int] = Field(default=None, description="耗时（毫秒）")
     text: Optional[str] = Field(default=None, description="候选文本（可能截断）")
     cleaned_text: Optional[str] = Field(default=None, description="用于 LLM 参考的清洗文本（可能截断）")

@@ -1,4 +1,4 @@
-# TingWu external diarizer service (pyannote) dependencies.
+# Xiyu external diarizer service (pyannote) dependencies.
 fastapi>=0.110.0
 uvicorn>=0.27.0
 python-multipart>=0.0.9

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add complete deployment documentation that takes users from a fresh machine to a working TingWu stack, covering Linux GPU + Docker Compose, macOS/Windows CPU + Docker Desktop, and local Python (no Docker) including the meeting stack launcher.
+**Goal:** Add complete deployment documentation that takes users from a fresh machine to a working Xiyu stack, covering Linux GPU + Docker Compose, macOS/Windows CPU + Docker Desktop, and local Python (no Docker) including the meeting stack launcher.
 
 **Architecture:** Write three focused docs under `docs/`:
 - `docs/DEPLOYMENT.md` (main “from 0 → running” guide)
@@ -58,7 +58,7 @@ Include:
 - Profile examples (`pytorch/onnx/sensevoice/gguf/whisper/qwen3/diarizer/all`)
 - Port table (match `.env.example`)
 - Whisper weights caching (`WHISPER_DOWNLOAD_ROOT` under `./data/models/whisper`)
-- Qwen3-ASR server (`qwen3-asr`) vs wrapper (`tingwu-qwen3`)
+- Qwen3-ASR server (`qwen3-asr`) vs wrapper (`xiyu-qwen3`)
 - VibeVoice/Router requirements (`VIBEVOICE_REPO_PATH`)
 - Speaker options:
   - backend-native
@@ -147,4 +147,3 @@ git commit -m "chore: update start.sh models help"
 **Step 2: Merge to main + push**
 
 Fast-forward merge the docs branch into `main` and push.
-

@@ -40,7 +40,7 @@ export const useConfigStore = create<ConfigState>()(
       setConfigLoading: (isConfigLoading) => set({ isConfigLoading }),
     }),
     {
-      name: 'tingwu-config-storage',
+      name: 'xiyu-config-storage',
       partialize: () => ({}), // 不持久化服务器配置
     }
   )

@@ -1,8 +1,8 @@
 # Multi-Backend (Per-Port) Frontend Selector + Speaker Unsupported Behavior — Design
 
 **Date:** 2026-02-16  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
-**Primary scenario:** One host runs **multiple TingWu containers** (different ASR backends/models), each exposed on a **different port**. The frontend lets the user pick which backend to use per transcription.
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
+**Primary scenario:** One host runs **multiple Xiyu containers** (different ASR backends/models), each exposed on a **different port**. The frontend lets the user pick which backend to use per transcription.
 
 ---
 
@@ -35,7 +35,7 @@
 - “Speaker diarization” is usually **not** part of a pure ASR model; it’s either:
   - an ASR backend that returns speaker tags (FunASR + `spk_model`, VibeVoice segments), or
   - a separate diarization pipeline.
-- Some TingWu backends already report `supports_speaker=false` (e.g. Qwen3 remote ASR wrapper).
+- Some Xiyu backends already report `supports_speaker=false` (e.g. Qwen3 remote ASR wrapper).
 
 ---
 
@@ -97,4 +97,3 @@ This matches the “turn-taking meeting” reading style.
 - Frontend sanity:
   - `yarn lint`
   - `yarn build` (typecheck + build)
-

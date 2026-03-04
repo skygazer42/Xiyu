@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 当后端不支持说话人识别（如 Qwen3-ASR）但用户开启 `with_speaker=true` 时，若配置启用 fallback diarization，则调用一个辅助 TingWu 服务获取说话人分段，并按 turn 切片用原后端转写；失败自动回退到现有 ignore 行为。
+**Goal:** 当后端不支持说话人识别（如 Qwen3-ASR）但用户开启 `with_speaker=true` 时，若配置启用 fallback diarization，则调用一个辅助 Xiyu 服务获取说话人分段，并按 turn 切片用原后端转写；失败自动回退到现有 ignore 行为。
 
-**Architecture:** Engine 在 `transcribe_async/transcribe_auto_async` 中检测 `supports_speaker`；启用 fallback 时先用 httpx 调用外部 TingWu 获取 `sentences`（带 start/end/speaker_id），合并为 turn 后逐段调用 primary backend 得到文本，最终返回 `sentences/speaker_turns/transcript`。
+**Architecture:** Engine 在 `transcribe_async/transcribe_auto_async` 中检测 `supports_speaker`；启用 fallback 时先用 httpx 调用外部 Xiyu 获取 `sentences`（带 start/end/speaker_id），合并为 turn 后逐段调用 primary backend 得到文本，最终返回 `sentences/speaker_turns/transcript`。
 
 **Tech Stack:** FastAPI + httpx；Python；pytest；docker-compose（多容器多端口）。
 
@@ -31,7 +31,7 @@ def test_settings_speaker_fallback_env(monkeypatch):
 
 **Step 2: Run test to verify it fails**
 
-Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_settings_speaker_fallback.py`  
+Run: `/Users/luke/code/xiyu/.venv/bin/pytest -q tests/test_settings_speaker_fallback.py`  
 Expected: FAIL (missing fields)
 
 **Step 3: Implement minimal settings**
@@ -45,7 +45,7 @@ Expected: FAIL (missing fields)
 
 **Step 4: Run test to verify it passes**
 
-Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_settings_speaker_fallback.py`  
+Run: `/Users/luke/code/xiyu/.venv/bin/pytest -q tests/test_settings_speaker_fallback.py`  
 Expected: PASS
 
 **Step 5: Commit**
@@ -75,7 +75,7 @@ git commit -m "config: add speaker fallback diarization settings"
 
 **Step 3: Verify**
 
-Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_api_http.py`  
+Run: `/Users/luke/code/xiyu/.venv/bin/pytest -q tests/test_api_http.py`  
 Expected: PASS
 
 **Step 4: Commit**
@@ -127,7 +127,7 @@ git commit -m "api: expose speaker fallback capability"
   - Else treat bytes as PCM
 
 **Step 3: Run**
-Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_audio_slice_pcm.py`
+Run: `/Users/luke/code/xiyu/.venv/bin/pytest -q tests/test_audio_slice_pcm.py`
 
 **Step 4: Commit**
 
@@ -146,7 +146,7 @@ Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_audio_slice_pcm.py`
 
 ---
 
-### Task 07: Add helper to call fallback TingWu diarization endpoint (TDD)
+### Task 07: Add helper to call fallback Xiyu diarization endpoint (TDD)
 
 **Files:**
 - Modify: `src/core/engine.py`
@@ -204,7 +204,7 @@ Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_audio_slice_pcm.py`
    - If `with_speaker` requested and backend unsupported:
      - If `speaker_fallback_diarization_enable`: try fallback pipeline first
      - Else existing behavior (ignore/error/fallback)
-2. Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_engine.py tests/test_speaker_fallback_diarization.py`
+2. Run: `/Users/luke/code/xiyu/.venv/bin/pytest -q tests/test_engine.py tests/test_speaker_fallback_diarization.py`
 3. Commit
 
 ---
@@ -229,9 +229,9 @@ Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_audio_slice_pcm.py`
 - Modify: `.env.example`
 
 **Steps:**
-1. Add env vars to `tingwu-qwen3` service (default off via `${...:-false}`):
+1. Add env vars to `xiyu-qwen3` service (default off via `${...:-false}`):
    - `SPEAKER_FALLBACK_DIARIZATION_ENABLE`
-   - `SPEAKER_FALLBACK_DIARIZATION_BASE_URL=http://tingwu-pytorch:8000`
+   - `SPEAKER_FALLBACK_DIARIZATION_BASE_URL=http://xiyu-pytorch:8000`
 2. Document recommendation: start `--profile pytorch --profile qwen3` to get diarization
 3. Commit
 
@@ -252,8 +252,8 @@ Run: `/Users/luke/code/tingwu/.venv/bin/pytest -q tests/test_audio_slice_pcm.py`
 ### Task 14: Python verification (fresh)
 
 Run:
-- `/Users/luke/code/tingwu/.venv/bin/python -m compileall -q src tests`
-- `/Users/luke/code/tingwu/.venv/bin/pytest -q`
+- `/Users/luke/code/xiyu/.venv/bin/python -m compileall -q src tests`
+- `/Users/luke/code/xiyu/.venv/bin/pytest -q`
 
 Expected: exit 0
 
@@ -275,4 +275,3 @@ Steps:
 1. Fast-forward merge branch into `main`
 2. Re-run Task 14/15 on `main`
 3. `git push origin main`
-

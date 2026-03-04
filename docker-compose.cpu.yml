@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  tingwu:
+  xiyu:
     build:
       context: .
       dockerfile: Dockerfile
-    image: tingwu-speech-service:cpu
-    container_name: tingwu-service-cpu
+    image: xiyu-speech-service:cpu
+    container_name: xiyu-service-cpu
     ports:
       - "${PORT:-8000}:8000"
     volumes:
@@ -21,7 +21,7 @@ services:
       - HOTWORDS_THRESHOLD=${HOTWORDS_THRESHOLD:-0.85}
       - SPEAKER_UNSUPPORTED_BEHAVIOR=${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
       - SPEAKER_EXTERNAL_DIARIZER_ENABLE=${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-false}
-      - SPEAKER_EXTERNAL_DIARIZER_BASE_URL=${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://tingwu-diarizer:8000}
+      - SPEAKER_EXTERNAL_DIARIZER_BASE_URL=${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://xiyu-diarizer:8000}
       - SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S=${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}

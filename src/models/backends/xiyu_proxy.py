@@ -1,7 +1,7 @@
-"""Proxy backend that calls another TingWu service over HTTP.
+"""Proxy backend that calls another Xiyu service over HTTP.
 
 This is mainly used by the Router backend to delegate inference to an existing
-model container (e.g. `tingwu-whisper`) without loading a second copy of the
+model container (e.g. `xiyu-whisper`) without loading a second copy of the
 model weights in the router container.
 
 Important: We intentionally disable nested features on the proxy target:
@@ -23,19 +23,19 @@ from src.models.backends.remote_utils import audio_input_to_wav_bytes
 logger = logging.getLogger(__name__)
 
 
-class TingWuTranscribeProxyBackend(ASRBackend):
-    """Call `/api/v1/transcribe` on another TingWu service instance."""
+class XiyuTranscribeProxyBackend(ASRBackend):
+    """Call `/api/v1/transcribe` on another Xiyu service instance."""
 
     def __init__(
         self,
         *,
         base_url: str,
         timeout_s: float = 60.0,
-        name: str = "tingwu-proxy",
+        name: str = "xiyu-proxy",
     ) -> None:
         self.base_url = str(base_url or "").rstrip("/")
         self.timeout_s = float(timeout_s)
-        self.name = str(name or "tingwu-proxy")
+        self.name = str(name or "xiyu-proxy")
         self._client: Optional[httpx.Client] = None
 
     def load(self) -> None:
@@ -69,7 +69,7 @@ class TingWuTranscribeProxyBackend(ASRBackend):
         assert self._client is not None
 
         if not self.base_url:
-            raise ValueError("TingWuTranscribeProxyBackend requires base_url")
+            raise ValueError("XiyuTranscribeProxyBackend requires base_url")
 
         wav_bytes, _duration_s = audio_input_to_wav_bytes(audio_input)
         url = f"{self.base_url}/api/v1/transcribe"
@@ -96,13 +96,13 @@ class TingWuTranscribeProxyBackend(ASRBackend):
             if len(body) > 4096:
                 body = body[:4096] + " ..."
             raise RuntimeError(
-                f"TingWu proxy HTTP {e.response.status_code} for {url}: {body or '<empty body>'}"
+                f"Xiyu proxy HTTP {e.response.status_code} for {url}: {body or '<empty body>'}"
             ) from e
 
         obj = resp.json()
         code = obj.get("code", 0)
         if code != 0:
-            raise RuntimeError(f"TingWu proxy returned code={code!r} for {url}")
+            raise RuntimeError(f"Xiyu proxy returned code={code!r} for {url}")
 
         text = str(obj.get("text") or "")
         sentence_info = []
@@ -136,10 +136,9 @@ class TingWuTranscribeProxyBackend(ASRBackend):
         base = super().get_info()
         base.update(
             {
-                "type": "tingwu_proxy",
+                "type": "xiyu_proxy",
                 "name": self.name,
                 "base_url": self.base_url,
             }
         )
         return base
-

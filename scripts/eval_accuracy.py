@@ -153,7 +153,7 @@ def _choose_text_for_scoring(result: Dict[str, Any], scoring_field: str) -> Tupl
 
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Evaluate accuracy across TingWu endpoints for one file or a directory (CER/WER/duplication).",
+        description="Evaluate accuracy across Xiyu endpoints for one file or a directory (CER/WER/duplication).",
     )
     parser.add_argument("--audio", required=True, help="Audio file or directory path.")
     parser.add_argument("--host", type=str, default="localhost", help="Host for --ports (default: localhost).")
@@ -333,4 +333,3 @@ def main(argv: Sequence[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

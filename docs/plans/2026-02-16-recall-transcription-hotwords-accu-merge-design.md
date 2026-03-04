@@ -69,7 +69,7 @@ We compute two merged texts:
 
 1) `text` (robust): current CapsWriter-inspired `merge_by_text` heuristic
 2) `text_accu` (precision): time-windowed `SequenceMatcher` alignment inspired by CapsWriter’s
-   token timestamp merge, adapted for TingWu:
+   token timestamp merge, adapted for Xiyu:
    - backends do not provide stable token timestamps across models
    - we approximate timestamps at the **character** level via linear interpolation over chunk time
 
@@ -89,4 +89,3 @@ This keeps existing clients stable while enabling recall/meeting UIs to prefer `
 - If we later add stable word/token timestamps from certain backends, we can upgrade `text_accu`
   to do true token-level alignment (closer to CapsWriter’s `text_accu`).
 - Meeting transcription quality also depends heavily on diarization & overlap speech handling.
-

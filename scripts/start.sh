@@ -5,7 +5,7 @@ MODE=${1:-gpu}
 PORT=${PORT:-8000}
 
 echo "======================================"
-echo "TingWu Speech Service Launcher"
+echo "Xiyu Speech Service Launcher"
 echo "======================================"
 
 case $MODE in
@@ -61,9 +61,9 @@ case $MODE in
             gguf) MODEL_PORT=${PORT_GGUF:-8104} ;;
             whisper) MODEL_PORT=${PORT_WHISPER:-8105} ;;
             diarizer) MODEL_PORT=${PORT_DIARIZER:-8300} ;;
-            qwen3) MODEL_PORT=${PORT_TINGWU_QWEN3:-8201} ;;
-            vibevoice) MODEL_PORT=${PORT_TINGWU_VIBEVOICE:-8202} ;;
-            router) MODEL_PORT=${PORT_TINGWU_ROUTER:-8200} ;;
+            qwen3) MODEL_PORT=${PORT_XIYU_QWEN3:-8201} ;;
+            vibevoice) MODEL_PORT=${PORT_XIYU_VIBEVOICE:-8202} ;;
+            router) MODEL_PORT=${PORT_XIYU_ROUTER:-8200} ;;
             *) MODEL_PORT="" ;;
         esac
         if [ -n "${MODEL_PORT}" ]; then
@@ -80,7 +80,7 @@ case $MODE in
                 echo "  - GGUF:      http://localhost:${PORT_GGUF:-8104}"
             fi
             echo "  - Whisper:   http://localhost:${PORT_WHISPER:-8105}"
-            echo "  - Qwen3:     http://localhost:${PORT_TINGWU_QWEN3:-8201}"
+            echo "  - Qwen3:     http://localhost:${PORT_XIYU_QWEN3:-8201}"
             echo "  - Diarizer:  http://localhost:${PORT_DIARIZER:-8300}"
         fi
         ;;

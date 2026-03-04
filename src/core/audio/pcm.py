@@ -1,6 +1,6 @@
 """PCM/WAV decoding helpers.
 
-TingWu's API layer standardizes uploads to 16kHz, 16-bit, mono PCM (s16le) bytes.
+Xiyu's API layer standardizes uploads to 16kHz, 16-bit, mono PCM (s16le) bytes.
 For long-audio chunking we often need a float32 waveform in [-1, 1].
 
 This module provides small utilities without requiring FFmpeg/librosa/soundfile.
@@ -57,7 +57,7 @@ def float32_to_pcm16le_bytes(audio: np.ndarray) -> bytes:
 def wav_bytes_to_float32(wav_data: bytes) -> Tuple[np.ndarray, int]:
     """Decode WAV container bytes into (audio_float32, sample_rate).
 
-    Only supports PCM16 mono WAV, which matches TingWu's internal standard.
+    Only supports PCM16 mono WAV, which matches Xiyu's internal standard.
     """
     with wave.open(io.BytesIO(wav_data), "rb") as wf:
         channels = wf.getnchannels()
@@ -71,4 +71,3 @@ def wav_bytes_to_float32(wav_data: bytes) -> Tuple[np.ndarray, int]:
         raise ValueError(f"Only 16-bit WAV is supported (sampwidth=2), got {sampwidth}")
 
     return pcm16le_bytes_to_float32(frames), int(sample_rate)
-

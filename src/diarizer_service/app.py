@@ -42,7 +42,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="TingWu Diarizer Service", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Xiyu Diarizer Service", version="1.0.0", lifespan=lifespan)
 
 app.include_router(diarizer_routes.router)
 
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     default_host = os.getenv("DIARIZER_HOST", "0.0.0.0")
     default_port = int(os.getenv("DIARIZER_PORT") or os.getenv("PORT") or "8300")
 
-    parser = argparse.ArgumentParser(description="Run TingWu Diarizer Service (FastAPI)")
+    parser = argparse.ArgumentParser(description="Run Xiyu Diarizer Service (FastAPI)")
     parser.add_argument("--host", default=default_host, help="Bind host (default: DIARIZER_HOST or 0.0.0.0)")
     parser.add_argument(
         "--port",

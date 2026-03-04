@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Smoke-test TingWu HTTP endpoints across multiple ports (multi-model deployment).
+# Smoke-test Xiyu HTTP endpoints across multiple ports (multi-model deployment).
 #
 # Usage:
 #   scripts/smoke_all_endpoints.sh
 #
 # Options (env):
-#   PORTS="8101 8102 ..."   Ports to test (default: common TingWu ports)
+#   PORTS="8101 8102 ..."   Ports to test (default: common Xiyu ports)
 #   AUDIO="data/benchmark/test_short.mp3"  Audio file for /transcribe tests
-#   TIMEOUT_S=10            Per-request curl timeout seconds
+#   TIMEOUT_S=10            Per-request curl timeout seconds (non-transcribe endpoints)
+#   TRANSCRIBE_TIMEOUT_S=60 /transcribe curl timeout seconds
 #   DIARIZER_PORT=8300      Optional diarizer port (set empty to skip)
 #
 # Notes:
@@ -20,12 +21,17 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 PORTS="${PORTS:-8101 8102 8103 8104 8105 8201 8202}"
-DIARIZER_PORT="${DIARIZER_PORT:-8300}"
+# Use `-` (not `:-`) so DIARIZER_PORT="" can intentionally disable diarizer checks.
+DIARIZER_PORT="${DIARIZER_PORT-8300}"
 REMOTE_ASR_PORTS="${REMOTE_ASR_PORTS:-9001 9002}"
 SKIP_REMOTE_ASR_CHECKS="${SKIP_REMOTE_ASR_CHECKS:-false}"
 TIMEOUT_S="${TIMEOUT_S:-10}"
+# Transcribe calls can be slow (first-time model download/warmup), especially for
+# remote ASR backends. Use a higher default so the smoke test is reliable.
+TRANSCRIBE_TIMEOUT_S="${TRANSCRIBE_TIMEOUT_S:-60}"
 REMOTE_ASR_TIMEOUT_S="${REMOTE_ASR_TIMEOUT_S:-8}"
-REMOTE_ASR_READY_RETRIES="${REMOTE_ASR_READY_RETRIES:-30}"
+# First-time vLLM startup (download + graph capture + warmup) can take >60s.
+REMOTE_ASR_READY_RETRIES="${REMOTE_ASR_READY_RETRIES:-90}"
 REMOTE_ASR_READY_SLEEP_S="${REMOTE_ASR_READY_SLEEP_S:-2}"
 AUDIO="${AUDIO:-data/benchmark/test_short.mp3}"
 
@@ -48,7 +54,7 @@ _fail() {
 }
 
 _tmpfile() {
-  mktemp -t tingwu_smoke_XXXXXX
+  mktemp -t xiyu_smoke_XXXXXX
 }
 
 _curl_to_file() {
@@ -248,7 +254,7 @@ _test_one_base() {
   local code
 
   tmp="$(_tmpfile)"
-  code="$(_curl_to_file "${tmp}" "${base}/api/v1/transcribe" \
+  code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/transcribe" \
     -X POST \
     -F "file=@${AUDIO}" \
     -F "with_speaker=false" \
@@ -265,7 +271,7 @@ _test_one_base() {
   rm -f "${tmp}" || true
 
   tmp="$(_tmpfile)"
-  code="$(_curl_to_file "${tmp}" "${base}/api/v1/transcribe/batch" \
+  code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/transcribe/batch" \
     -X POST \
     -F "files=@${AUDIO}" \
     -F "files=@${AUDIO}" \
@@ -295,7 +301,7 @@ _test_diarizer() {
 
   # Diarizer only accepts WAV container input.
   local wav_tmp
-  wav_tmp="$(mktemp -t tingwu_diarizer_XXXXXX.wav)"
+  wav_tmp="$(mktemp -t xiyu_diarizer_XXXXXX.wav)"
   if command -v ffmpeg >/dev/null 2>&1; then
     ffmpeg -nostdin -y -loglevel error -i "${AUDIO}" -ac 1 -ar 16000 -c:a pcm_s16le "${wav_tmp}" || true
   fi
@@ -317,11 +323,12 @@ _test_diarizer() {
   rm -f "${wav_tmp}" || true
 }
 
-echo "TingWu smoke test"
+echo "Xiyu smoke test"
 echo "- PORTS=${PORTS}"
 echo "- REMOTE_ASR_PORTS=${REMOTE_ASR_PORTS} (skip=${SKIP_REMOTE_ASR_CHECKS})"
 echo "- AUDIO=${AUDIO}"
 echo "- TIMEOUT_S=${TIMEOUT_S}"
+echo "- TRANSCRIBE_TIMEOUT_S=${TRANSCRIBE_TIMEOUT_S}"
 echo "- REMOTE_ASR_TIMEOUT_S=${REMOTE_ASR_TIMEOUT_S} retries=${REMOTE_ASR_READY_RETRIES} sleep=${REMOTE_ASR_READY_SLEEP_S}s"
 echo ""
 

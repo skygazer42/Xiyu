@@ -17,7 +17,7 @@ export const useBackendStore = create<BackendState>()(
       },
     }),
     {
-      name: 'tingwu-backend-storage',
+      name: 'xiyu-backend-storage',
       partialize: (state) => ({ baseUrl: state.baseUrl }),
       onRehydrateStorage: () => (state) => {
         if (state?.baseUrl !== undefined) {

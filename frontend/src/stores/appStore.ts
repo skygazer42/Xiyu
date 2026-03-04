@@ -39,7 +39,7 @@ export const useAppStore = create<AppState>()(
       setLoading: (isLoading) => set({ isLoading }),
     }),
     {
-      name: 'tingwu-app-storage',
+      name: 'xiyu-app-storage',
       partialize: (state) => ({
         theme: state.theme,
         sidebarCollapsed: state.sidebarCollapsed,

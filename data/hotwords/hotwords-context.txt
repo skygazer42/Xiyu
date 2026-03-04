@@ -13,7 +13,7 @@
 # - 可以比 hotwords.txt 更大（但注入过大可能会影响模型，建议控制在 50~200）
 
 # 产品/模型
-TingWu
+Xiyu
 FunASR
 Paraformer
 SenseVoice

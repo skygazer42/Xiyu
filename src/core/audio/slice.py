@@ -1,6 +1,6 @@
 """PCM slicing helpers for diarization-based post-processing.
 
-TingWu's HTTP upload pipeline typically normalizes audio to 16kHz, mono, PCM16LE
+Xiyu's HTTP upload pipeline typically normalizes audio to 16kHz, mono, PCM16LE
 bytes before passing it into the engine. Some paths (e.g. video extraction)
 may provide WAV container bytes; for speaker-fallback we need raw PCM bytes for
 ms-based slicing.
@@ -98,4 +98,3 @@ def slice_pcm16le(
         return b""
 
     return pcm16le[start_byte:end_byte]
-

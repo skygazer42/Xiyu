@@ -41,7 +41,7 @@ def test_ensure_run_dir_creates_local_stack_dir(tmp_path: Path):
 def test_build_meeting_specs_has_two_services(tmp_path: Path, monkeypatch):
     from scripts import local_stack
 
-    monkeypatch.delenv("TINGWU_PYTHON", raising=False)
+    monkeypatch.delenv("XIYU_PYTHON", raising=False)
     monkeypatch.delenv("DIARIZER_PYTHON", raising=False)
     monkeypatch.setenv("PORT_PYTORCH", "18101")
     monkeypatch.setenv("DIARIZER_PORT", "18300")

@@ -1,7 +1,7 @@
 # Local Meeting Stack Launcher (No Docker) — Design
 
 **Date:** 2026-02-20  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
 **Primary goal:** provide a **one-command local (non-Docker) launcher** for the meeting transcription scenario:
 
 - **PyTorch backend** (`ASR_BACKEND=pytorch`) for high accuracy + speaker utilities
@@ -13,7 +13,7 @@ This feature is intentionally scoped to the “meeting mode” default path the 
 
 ## Current state
 
-TingWu already supports “no Docker” startup, but requires manual multi-process management:
+Xiyu already supports “no Docker” startup, but requires manual multi-process management:
 
 - Main service: `ASR_BACKEND=pytorch PORT=8101 python -m src.main`
 - Diarizer: `HF_TOKEN=... DIARIZER_PORT=8300 python -m src.diarizer_service.app`
@@ -65,7 +65,7 @@ This works, but is cumbersome for day-to-day usage.
 ## Non-goals (v1)
 
 - Starting remote model servers (e.g. `qwen3-asr`, `vibevoice-asr`) without Docker.
-  - TingWu can run a *wrapper* backend locally, but the remote ASR server setup is external to this repo.
+  - Xiyu can run a *wrapper* backend locally, but the remote ASR server setup is external to this repo.
 - Acting as a full supervisor (systemd/launchd replacement).
 - Windows-specific process management edge cases (script should still be best-effort portable).
 - Building the frontend (`npm run build`) or managing Node dependencies.
@@ -96,8 +96,8 @@ Mode:
      - `DIARIZER_WARMUP_ON_STARTUP=true` (default)
      - `HF_TOKEN` passed through if set (optional)
 
-2) **TingWu main service (PyTorch)**
-   - Command: `<TINGWU_PYTHON> -m src.main --host <host> --port <port>`
+2) **Xiyu main service (PyTorch)**
+   - Command: `<XIYU_PYTHON> -m src.main --host <host> --port <port>`
    - Env (passthrough + defaults):
      - `ASR_BACKEND=pytorch`
      - `PORT=8101` (default)
@@ -129,7 +129,7 @@ The launcher should fail fast with actionable messages:
 
 The launcher supports using separate Python interpreters:
 
-- `TINGWU_PYTHON=/path/to/python`
+- `XIYU_PYTHON=/path/to/python`
 - `DIARIZER_PYTHON=/path/to/python`
 
 This enables the recommended setup:
@@ -158,4 +158,3 @@ Add lightweight unit tests that do not actually spawn uvicorn:
 - Verify stop sends signals to the pid.
 
 The core logic should be written in small functions to keep tests simple.
-

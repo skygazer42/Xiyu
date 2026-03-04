@@ -1,4 +1,4 @@
-# TingWu ASR Accuracy Optimization — Implementation Plan
+# Xiyu ASR Accuracy Optimization — Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -26,7 +26,7 @@ These items are already done in the current workspace:
 - Preprocessing now removes DC offset by default (`src/core/audio/preprocessor.py`) + tests (`tests/test_audio_preprocess_dc_offset.py`)
 - Normalization supports robust RMS (top-frame percentile) to avoid over-boosting long silences (`src/core/audio/preprocessor.py`) + tests (`tests/test_audio_preprocess_normalize_robust.py`)
 - Adaptive preprocessing now gates denoise OFF for high-SNR audio (avoids damaging clean recordings) (`src/core/audio/preprocessor.py`) + tests (`tests/test_audio_preprocess_denoise_gating.py`)
-- ONNX + GGUF backends now accept TingWu-standard raw PCM16LE bytes (fixes HTTP/chunking compatibility) (`src/models/backends/onnx.py`, `src/models/backends/gguf/backend.py`)
+- ONNX + GGUF backends now accept Xiyu-standard raw PCM16LE bytes (fixes HTTP/chunking compatibility) (`src/models/backends/onnx.py`, `src/models/backends/gguf/backend.py`)
 - Per-request tuning (`asr_options`) is supported + allowlisted (`src/api/asr_options.py`) and plumbed through API → engine → backend
 - Multi-model per-port container deployment with on-demand profiles (`docker-compose.models.yml`, `scripts/start.sh`)
 - Qwen3-ASR default model is `Qwen/Qwen3-ASR-0.6B` (compose + scripts + Settings)

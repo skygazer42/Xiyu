@@ -52,9 +52,9 @@ def test_qwen3_remote_backend_formats_hotwords_as_a_context_hint():
             return None
 
     with patch("httpx.Client.post", return_value=Resp()) as post:
-        _ = backend.transcribe(b"\x00\x00" * 16000, hotwords="OpenAI\nTingWu")
+        _ = backend.transcribe(b"\x00\x00" * 16000, hotwords="OpenAI\nXiyu")
         called_data = post.call_args.kwargs["data"]
         prompt = called_data.get("prompt", "")
         assert "专有名词" in prompt
         assert "OpenAI" in prompt
-        assert "TingWu" in prompt
+        assert "Xiyu" in prompt

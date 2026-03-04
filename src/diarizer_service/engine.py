@@ -14,7 +14,7 @@ class DiarizerEngine:
     """External diarization engine (pyannote), with lazy imports.
 
     This module must stay importable without heavyweight ML deps so unit tests for
-    the main TingWu service can run without installing `pyannote.audio`.
+    the main Xiyu service can run without installing `pyannote.audio`.
     """
 
     def __init__(

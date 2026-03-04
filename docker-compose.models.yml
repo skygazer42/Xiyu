@@ -1,12 +1,12 @@
-# Multi-model deployment: each model/backend runs as its own TingWu container,
-# exposing the same TingWu HTTP API on a different host port.
+# Multi-model deployment: each model/backend runs as its own Xiyu container,
+# exposing the same Xiyu HTTP API on a different host port.
 #
 # This file is designed for *on-demand* startup via Compose profiles:
 #   docker compose -f docker-compose.models.yml --profile pytorch up -d
 #   docker compose -f docker-compose.models.yml --profile onnx up -d
 #
 # Or explicitly target a service (Compose will run it even if profiled):
-#   docker compose -f docker-compose.models.yml up -d tingwu-pytorch
+#   docker compose -f docker-compose.models.yml up -d xiyu-pytorch
 #
 # Tip: use only one GPU-heavy profile at a time unless you have multiple GPUs/VRAM.
 
@@ -25,7 +25,7 @@ x-proxy-env: &proxy-env
   all_proxy: ${all_proxy:-}
   no_proxy: ${no_proxy:-localhost,127.0.0.1,::1}
 
-x-tingwu-env: &tingwu-env
+x-xiyu-env: &xiyu-env
   <<: *proxy-env
   DEBUG: ${DEBUG:-false}
   HOTWORDS_THRESHOLD: ${HOTWORDS_THRESHOLD:-0.85}
@@ -53,7 +53,7 @@ x-tingwu-env: &tingwu-env
   SPEAKER_UNSUPPORTED_BEHAVIOR: ${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
   # External diarizer (pyannote) - when enabled, forces all backends to output speaker_turns.
   SPEAKER_EXTERNAL_DIARIZER_ENABLE: ${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-false}
-  SPEAKER_EXTERNAL_DIARIZER_BASE_URL: ${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://tingwu-diarizer:8000}
+  SPEAKER_EXTERNAL_DIARIZER_BASE_URL: ${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://xiyu-diarizer:8000}
   SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S: ${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}
   SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
   SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}
@@ -63,37 +63,37 @@ x-tingwu-env: &tingwu-env
   NGPU: ${NGPU:-1}
   NCPU: ${NCPU:-4}
 
-x-tingwu-volumes: &tingwu-volumes
+x-xiyu-volumes: &xiyu-volumes
   - ./data:/app/data
   - model-cache:/root/.cache/modelscope
   - huggingface-cache:/root/.cache/huggingface
 
-x-tingwu-logging: &tingwu-logging
+x-xiyu-logging: &xiyu-logging
   driver: "json-file"
   options:
     max-size: "100m"
     max-file: "3"
 
-x-tingwu-base: &tingwu-base
+x-xiyu-base: &xiyu-base
   build:
     context: .
     dockerfile: Dockerfile
-  image: tingwu-speech-service:pytorch
-  volumes: *tingwu-volumes
+  image: xiyu-speech-service:pytorch
+  volumes: *xiyu-volumes
   restart: unless-stopped
-  logging: *tingwu-logging
+  logging: *xiyu-logging
 
 services:
   # =====================
   # External diarization
   # =====================
-  tingwu-diarizer:
+  xiyu-diarizer:
     build:
       context: .
       dockerfile: Dockerfile.diarizer
-    image: tingwu-diarizer:pyannote
+    image: xiyu-diarizer:pyannote
     profiles: ["diarizer", "all"]
-    container_name: tingwu-diarizer
+    container_name: xiyu-diarizer
     ports:
       - "${PORT_DIARIZER:-8300}:8000"
     volumes:
@@ -117,19 +117,19 @@ services:
               count: 1
               capabilities: [gpu]
     restart: unless-stopped
-    logging: *tingwu-logging
+    logging: *xiyu-logging
 
   # ======================
   # Local (in-process) ASR
   # ======================
-  tingwu-pytorch:
-    <<: *tingwu-base
+  xiyu-pytorch:
+    <<: *xiyu-base
     profiles: ["pytorch", "all"]
-    container_name: tingwu-pytorch
+    container_name: xiyu-pytorch
     ports:
       - "${PORT_PYTORCH:-8101}:8000"
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: pytorch
       DEVICE: ${PYTORCH_DEVICE:-cuda}
       NGPU: ${PYTORCH_NGPU:-1}
@@ -142,7 +142,7 @@ services:
               count: 1
               capabilities: [gpu]
 
-  tingwu-onnx:
+  xiyu-onnx:
     # ONNX backend uses a dedicated Dockerfile with extra runtime deps.
     build:
       context: .
@@ -150,9 +150,9 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
-    image: tingwu-speech-service:onnx
+    image: xiyu-speech-service:onnx
     profiles: ["onnx", "all"]
-    container_name: tingwu-onnx
+    container_name: xiyu-onnx
     ports:
       - "${PORT_ONNX:-8102}:8000"
     volumes:
@@ -161,7 +161,7 @@ services:
       - huggingface-cache:/root/.cache/huggingface
       - onnx-cache:/root/.cache/funasr_onnx
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: onnx
       DEVICE: ${ONNX_DEVICE:-cpu}
       NGPU: ${ONNX_NGPU:-0}
@@ -169,16 +169,16 @@ services:
       OMP_NUM_THREADS: ${ONNX_NCPU:-8}
       MKL_NUM_THREADS: ${ONNX_NCPU:-8}
     restart: unless-stopped
-    logging: *tingwu-logging
+    logging: *xiyu-logging
 
-  tingwu-sensevoice:
-    <<: *tingwu-base
+  xiyu-sensevoice:
+    <<: *xiyu-base
     profiles: ["sensevoice", "all"]
-    container_name: tingwu-sensevoice
+    container_name: xiyu-sensevoice
     ports:
       - "${PORT_SENSEVOICE:-8103}:8000"
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: sensevoice
       DEVICE: ${SENSEVOICE_DEVICE:-cuda}
       NGPU: ${SENSEVOICE_NGPU:-1}
@@ -193,14 +193,14 @@ services:
               count: 1
               capabilities: [gpu]
 
-  tingwu-whisper:
-    <<: *tingwu-base
+  xiyu-whisper:
+    <<: *xiyu-base
     profiles: ["whisper", "all"]
-    container_name: tingwu-whisper
+    container_name: xiyu-whisper
     ports:
       - "${PORT_WHISPER:-8105}:8000"
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: whisper
       DEVICE: ${WHISPER_DEVICE:-cuda}
       NGPU: ${WHISPER_NGPU:-1}
@@ -220,7 +220,7 @@ services:
               count: 1
               capabilities: [gpu]
 
-  tingwu-gguf:
+  xiyu-gguf:
     # GGUF backend requires extra Python deps (onnxruntime + gguf) and
     # model artifacts under ./data/models. See README for expected files.
     build:
@@ -228,7 +228,7 @@ services:
       dockerfile: Dockerfile.gguf
       args:
         # If GitHub access is unstable/blocked, set LLAMA_CPP_REPO to an internal mirror:
-        #   LLAMA_CPP_REPO=https://gitee.com/mirrors/llama.cpp.git docker compose ... build tingwu-gguf
+        #   LLAMA_CPP_REPO=https://gitee.com/mirrors/llama.cpp.git docker compose ... build xiyu-gguf
         LLAMA_CPP_REPO: ${LLAMA_CPP_REPO:-https://github.com/ggml-org/llama.cpp.git}
         # Fallback mirror used when the primary repo is unreachable.
         # Set to empty to disable the fallback.
@@ -236,14 +236,14 @@ services:
         LLAMA_CPP_REF: ${LLAMA_CPP_REF:-}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
-    image: tingwu-speech-service:gguf
+    image: xiyu-speech-service:gguf
     profiles: ["gguf", "all"]
-    container_name: tingwu-gguf
+    container_name: xiyu-gguf
     ports:
       - "${PORT_GGUF:-8104}:8000"
-    volumes: *tingwu-volumes
+    volumes: *xiyu-volumes
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: gguf
       DEVICE: ${GGUF_DEVICE:-cpu}
       NGPU: ${GGUF_NGPU:-0}
@@ -276,13 +276,13 @@ services:
   # Remote ASR (OpenAI-style)
   # ==========================
   # These two services run the remote ASR servers. They are optional and only
-  # started when enabling their profiles. TingWu wrappers below expose a unified
-  # TingWu API for each model.
+  # started when enabling their profiles. Xiyu wrappers below expose a unified
+  # Xiyu API for each model.
   qwen3-asr:
     image: ${QWEN3_ASR_IMAGE:-qwenllm/qwen3-asr:latest}
     profiles: ["qwen3", "router", "all"]
     container_name: qwen3-asr
-    # Expose for debugging (TingWu talks via the docker network name).
+    # Expose for debugging (Xiyu talks via the docker network name).
     ports:
       - "${PORT_QWEN3_ASR:-9001}:8000"
     ipc: host
@@ -375,14 +375,14 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  tingwu-qwen3:
-    <<: *tingwu-base
+  xiyu-qwen3:
+    <<: *xiyu-base
     profiles: ["qwen3", "all"]
-    container_name: tingwu-qwen3
+    container_name: xiyu-qwen3
     ports:
-      - "${PORT_TINGWU_QWEN3:-8201}:8000"
+      - "${PORT_XIYU_QWEN3:-8201}:8000"
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: qwen3
       DEVICE: ${QWEN3_WRAPPER_DEVICE:-cpu}
       NGPU: ${QWEN3_WRAPPER_NGPU:-0}
@@ -391,24 +391,24 @@ services:
       QWEN3_ASR_MODEL: ${QWEN3_MODEL_ID:-Qwen/Qwen3-ASR-0.6B}
       QWEN3_ASR_API_KEY: ${QWEN3_ASR_API_KEY:-EMPTY}
       QWEN3_ASR_TIMEOUT_S: ${QWEN3_ASR_TIMEOUT_S:-60}
-      # Optional: speaker fallback diarization via a helper TingWu service (e.g. tingwu-pytorch).
+      # Optional: speaker fallback diarization via a helper Xiyu service (e.g. xiyu-pytorch).
       # Enables "说话人1/2/3" output even when Qwen3-ASR itself doesn't support diarization.
       SPEAKER_FALLBACK_DIARIZATION_ENABLE: ${SPEAKER_FALLBACK_DIARIZATION_ENABLE:-false}
-      SPEAKER_FALLBACK_DIARIZATION_BASE_URL: ${SPEAKER_FALLBACK_DIARIZATION_BASE_URL:-http://tingwu-pytorch:8000}
+      SPEAKER_FALLBACK_DIARIZATION_BASE_URL: ${SPEAKER_FALLBACK_DIARIZATION_BASE_URL:-http://xiyu-pytorch:8000}
       SPEAKER_FALLBACK_DIARIZATION_TIMEOUT_S: ${SPEAKER_FALLBACK_DIARIZATION_TIMEOUT_S:-30}
       SPEAKER_FALLBACK_MAX_TURN_DURATION_S: ${SPEAKER_FALLBACK_MAX_TURN_DURATION_S:-25}
       SPEAKER_FALLBACK_MAX_TURNS: ${SPEAKER_FALLBACK_MAX_TURNS:-200}
     depends_on:
       - qwen3-asr
 
-  tingwu-vibevoice:
-    <<: *tingwu-base
+  xiyu-vibevoice:
+    <<: *xiyu-base
     profiles: ["vibevoice", "all"]
-    container_name: tingwu-vibevoice
+    container_name: xiyu-vibevoice
     ports:
-      - "${PORT_TINGWU_VIBEVOICE:-8202}:8000"
+      - "${PORT_XIYU_VIBEVOICE:-8202}:8000"
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: vibevoice
       DEVICE: ${VIBEVOICE_WRAPPER_DEVICE:-cpu}
       NGPU: ${VIBEVOICE_WRAPPER_NGPU:-0}
@@ -421,14 +421,14 @@ services:
     depends_on:
       - vibevoice-asr
 
-  tingwu-router:
-    <<: *tingwu-base
+  xiyu-router:
+    <<: *xiyu-base
     profiles: ["router"]
-    container_name: tingwu-router
+    container_name: xiyu-router
     ports:
-      - "${PORT_TINGWU_ROUTER:-8200}:8000"
+      - "${PORT_XIYU_ROUTER:-8200}:8000"
     environment:
-      <<: *tingwu-env
+      <<: *xiyu-env
       ASR_BACKEND: router
       DEVICE: ${ROUTER_DEVICE:-cpu}
       NGPU: ${ROUTER_NGPU:-0}

@@ -79,7 +79,7 @@ def _prefetch_one(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Prefetch (download + warmup) TingWu local ASR backends.\n"
+            "Prefetch (download + warmup) Xiyu local ASR backends.\n"
             "This helps avoid slow first requests when running locally."
         )
     )
@@ -151,7 +151,7 @@ def main() -> int:
         return 2
 
     print("======================================")
-    print("TingWu Local Model Prefetch")
+    print("Xiyu Local Model Prefetch")
     print("======================================")
     print(f"Repo: {repo_root}")
     print(f"Backends: {', '.join(backends)}")
@@ -206,4 +206,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

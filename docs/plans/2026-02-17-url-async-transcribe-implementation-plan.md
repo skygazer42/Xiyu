@@ -1,4 +1,4 @@
-# TingWu URL 异步转写（前端任务队列）Implementation Plan
+# Xiyu URL 异步转写（前端任务队列）Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -371,4 +371,3 @@ Expected: PASS
 **Step 3: Push**
 
 Run: `git push origin main`
-

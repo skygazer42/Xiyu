@@ -1,4 +1,4 @@
-# TingWu 语音转写服务 API 文档
+# Xiyu 语音转写服务 API 文档
 
 > 版本: 1.0.0 | 更新日期: 2026-02-18
 
@@ -20,7 +20,7 @@
 
 ## 概述
 
-TingWu 是一个高性能的中文语音转写服务，支持：
+Xiyu 是一个高性能的中文语音转写服务，支持：
 
 - **多后端支持**: PyTorch、ONNX、SenseVoice、GGUF、Whisper、Qwen3-ASR(远程包装)、VibeVoice-ASR(远程包装)、Router
 - **实时流式转写**: WebSocket 双向识别
@@ -29,8 +29,8 @@ TingWu 是一个高性能的中文语音转写服务，支持：
 - **LLM 润色**: 支持多种 LLM 角色纠错
 - **文本后处理**: ITN、标点恢复、繁简转换等
 
-> 说明：Qwen3 / VibeVoice 在本项目中通常以“远程 ASR + TingWu wrapper”的方式部署。
-> 也就是说，真正提供 TingWu API 的是 `tingwu-qwen3` / `tingwu-vibevoice` 容器；而 `qwen3-asr` / `vibevoice-asr` 是 OpenAI-compatible 服务端。
+> 说明：Qwen3 / VibeVoice 在本项目中通常以“远程 ASR + Xiyu wrapper”的方式部署。
+> 也就是说，真正提供 Xiyu API 的是 `xiyu-qwen3` / `xiyu-vibevoice` 容器；而 `qwen3-asr` / `vibevoice-asr` 是 OpenAI-compatible 服务端。
 
 **基础URL**: `http://localhost:8000`
 
@@ -84,7 +84,7 @@ GET /service-info
 
 ```json
 {
-  "name": "TingWu Speech Service",
+  "name": "Xiyu Speech Service",
   "version": "1.0.0",
   "docs": "/docs"
 }
@@ -163,22 +163,29 @@ GET /metrics/prometheus
 **响应示例**:
 
 ```text
-# HELP tingwu_uptime_seconds Service uptime in seconds
-# TYPE tingwu_uptime_seconds gauge
-tingwu_uptime_seconds 3600.5
+# HELP xiyu_uptime_seconds Service uptime in seconds
+# TYPE xiyu_uptime_seconds gauge
+xiyu_uptime_seconds 3600.5
 
-# HELP tingwu_requests_total Total number of requests
-# TYPE tingwu_requests_total counter
-tingwu_requests_total{status="success"} 1200
-tingwu_requests_total{status="failed"} 50
+# HELP xiyu_requests_total Total number of requests
+# TYPE xiyu_requests_total counter
+xiyu_requests_total 1250
 
-# HELP tingwu_audio_seconds_total Total audio seconds processed
-# TYPE tingwu_audio_seconds_total counter
-tingwu_audio_seconds_total 45000.0
+# HELP xiyu_requests_successful_total Successful requests
+# TYPE xiyu_requests_successful_total counter
+xiyu_requests_successful_total 1200
 
-# HELP tingwu_rtf_average Average Real-Time Factor
-# TYPE tingwu_rtf_average gauge
-tingwu_rtf_average 0.15
+# HELP xiyu_requests_failed_total Failed requests
+# TYPE xiyu_requests_failed_total counter
+xiyu_requests_failed_total 50
+
+# HELP xiyu_audio_seconds_total Total audio processed in seconds
+# TYPE xiyu_audio_seconds_total counter
+xiyu_audio_seconds_total 45000.0
+
+# HELP xiyu_rtf_avg Average Real-Time Factor
+# TYPE xiyu_rtf_avg gauge
+xiyu_rtf_avg 0.15
 ```
 
 ---
@@ -219,12 +226,12 @@ GET /api/v1/backend
 **capabilities 说明**:
 
 - `supports_speaker`：当前后端原生是否支持说话人识别（由 backend 决定）
-- `supports_speaker_fallback`：是否启用了“fallback diarization”（辅助 TingWu 服务生成分段）
-- `supports_speaker_external`：是否启用了“external diarizer”（`tingwu-diarizer`，pyannote）
+- `supports_speaker_fallback`：是否启用了“fallback diarization”（辅助 Xiyu 服务生成分段）
+- `supports_speaker_external`：是否启用了“external diarizer”（`xiyu-diarizer`，pyannote）
 - `speaker_strategy`：当请求 `with_speaker=true` 时，当前实例会采用的策略：
   - `external`：强制 external diarizer（推荐会议场景，所有后端统一输出 `speaker_turns`）
   - `native`：后端原生 speaker
-  - `fallback_diarization`：使用辅助 TingWu 服务生成分段，再按 turn 切片转写
+  - `fallback_diarization`：使用辅助 Xiyu 服务生成分段，再按 turn 切片转写
   - `fallback_backend`：回退到 PyTorch 后端执行 speaker（可能违背“端口=模型”预期）
   - `ignore`：忽略 speaker（按 `with_speaker=false` 处理）
   - `error`：直接报错（HTTP 400）
@@ -393,7 +400,7 @@ Content-Type: multipart/form-data
   "candidates": [
     {
       "backend": "pytorch",
-      "base_url": "http://tingwu-pytorch:8000",
+      "base_url": "http://xiyu-pytorch:8000",
       "success": true,
       "http_status": 200,
       "code": 0,
@@ -540,7 +547,7 @@ Content-Type: multipart/form-data
 ```
 
 > 说明：该接口仅保证**返回格式**兼容 Whisper ASR WebService。
-> 实际使用的模型/后端由当前 TingWu 服务实例的 `ASR_BACKEND` 决定（可通过 `GET /api/v1/backend` 探测）。
+> 实际使用的模型/后端由当前 Xiyu 服务实例的 `ASR_BACKEND` 决定（可通过 `GET /api/v1/backend` 探测）。
 
 **请求参数**:
 
@@ -648,7 +655,7 @@ GET /api/v1/hotwords
     "人工智能",
     "机器学习",
     "深度学习",
-    "TingWu"
+    "Xiyu"
   ],
   "count": 4
 }
@@ -786,7 +793,7 @@ GET /config/all
 ```json
 {
   "config": {
-    "app_name": "TingWu Speech Service",
+    "app_name": "Xiyu Speech Service",
     "version": "1.0.0",
     "asr_backend": "pytorch",
     "device": "cuda",

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a one-command **local (non-Docker) launcher** that starts a meeting-ready stack: **TingWu PyTorch backend + external diarizer (pyannote)**, with simple `start/stop/status/logs` lifecycle management.
+**Goal:** Add a one-command **local (non-Docker) launcher** that starts a meeting-ready stack: **Xiyu PyTorch backend + external diarizer (pyannote)**, with simple `start/stop/status/logs` lifecycle management.
 
 **Architecture:** Implement `scripts/local_stack.py` (no new deps) that starts two uvicorn-based modules (`python -m src.main`, `python -m src.diarizer_service.app`) in the background via `subprocess.Popen`, storing pidfiles + logs under `./.run/local_stack/`. In `meeting` mode, the launcher always enables `SPEAKER_EXTERNAL_DIARIZER_ENABLE=true` for the main service.
 
@@ -138,7 +138,7 @@ python scripts/local_stack.py stop
 ```
 
 Mention env overrides:
-- `TINGWU_PYTHON=...`
+- `XIYU_PYTHON=...`
 - `DIARIZER_PYTHON=...`
 - `PORT_PYTORCH=...`
 - `DIARIZER_PORT=...`

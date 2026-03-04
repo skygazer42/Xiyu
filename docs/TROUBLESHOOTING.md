@@ -205,7 +205,7 @@ fatal: fetch-pack: invalid index-pack output
 1) **重试一次**（偶发网络抖动会自愈）：
 
 ```bash
-docker compose -f docker-compose.models.yml build --no-cache tingwu-gguf
+docker compose -f docker-compose.models.yml build --no-cache xiyu-gguf
 ```
 
 2) 如果持续失败：把 `llama.cpp` repo 换成可访问的镜像源/内网 Git mirror
@@ -214,7 +214,7 @@ docker compose -f docker-compose.models.yml build --no-cache tingwu-gguf
 
 ```bash
 LLAMA_CPP_REPO=https://gitee.com/mirrors/llama.cpp.git \
-  docker compose -f docker-compose.models.yml build --no-cache tingwu-gguf
+  docker compose -f docker-compose.models.yml build --no-cache xiyu-gguf
 ```
 
 说明：
@@ -227,12 +227,12 @@ LLAMA_CPP_REPO=https://gitee.com/mirrors/llama.cpp.git \
 ```bash
 # 1) 直接指定主 repo（最推荐）
 LLAMA_CPP_REPO=https://gitee.com/mirrors/llama.cpp.git \
-  docker compose -f docker-compose.models.yml build --no-cache tingwu-gguf
+  docker compose -f docker-compose.models.yml build --no-cache xiyu-gguf
 
 # 2) 使用公司内网 mirror，并关闭 fallback（可选）
 LLAMA_CPP_REPO=http://git.company.local/llama.cpp.git \
 LLAMA_CPP_REPO_FALLBACK= \
-  docker compose -f docker-compose.models.yml build --no-cache tingwu-gguf
+  docker compose -f docker-compose.models.yml build --no-cache xiyu-gguf
 ```
 
 > 如果你们公司/内网有自己的 GitHub mirror，把 `LLAMA_CPP_REPO` 换成内网地址即可；必要时也可以用 `LLAMA_CPP_REPO_FALLBACK` 做第二备选。
@@ -246,7 +246,7 @@ LLAMA_CPP_REPO_FALLBACK= \
 示例（在宿主机准备好源码；可从任意可访问渠道获取）：
 
 ```bash
-cd TingWu
+cd Xiyu
 mkdir -p third_party
 
 # 如果你宿主机能访问 gitee（或公司内网 mirror），在宿主机 clone（不是容器内 clone）
@@ -256,7 +256,7 @@ git clone --depth 1 https://gitee.com/mirrors/llama.cpp.git third_party/llama.cp
 rm -rf third_party/llama.cpp/.git
 
 # 然后再构建
-docker compose -f docker-compose.models.yml build --no-cache tingwu-gguf
+docker compose -f docker-compose.models.yml build --no-cache xiyu-gguf
 ```
 
 > 注意：如果你选择离线源码方式，`LLAMA_CPP_REF`（按 tag/commit pin）将被忽略，因为源码目录通常不带 `.git`。
@@ -293,8 +293,8 @@ PIP_TRUSTED_HOST=mirrors.aliyun.com
 然后重建：
 
 ```bash
-docker compose -f docker-compose.models.yml build tingwu-onnx
-docker compose -f docker-compose.models.yml build tingwu-gguf
+docker compose -f docker-compose.models.yml build xiyu-onnx
+docker compose -f docker-compose.models.yml build xiyu-gguf
 ```
 
 2) **使用代理（企业内网常见）**  
@@ -394,17 +394,17 @@ docker compose up -d
 
 这类后端通常 **不原生输出 speaker**。要得到 `说话人1/2/3`：
 
-- 推荐：启用 external diarizer（`tingwu-diarizer`）
-- 或者：启用 fallback diarization（用 `tingwu-pytorch` 辅助分段）
+- 推荐：启用 external diarizer（`xiyu-diarizer`）
+- 或者：启用 fallback diarization（用 `xiyu-pytorch` 辅助分段）
 
 ### 4.2 external diarizer 启用了，但仍然没有 speaker？
 
 检查：
 
 1) diarizer 服务是否活着：`http://localhost:8300/health`
-2) TingWu 是否配置了：
+2) Xiyu 是否配置了：
    - `SPEAKER_EXTERNAL_DIARIZER_ENABLE=true`
-   - `SPEAKER_EXTERNAL_DIARIZER_BASE_URL=http://tingwu-diarizer:8000`（容器内网络）或 `http://localhost:8300`（本地）  
+   - `SPEAKER_EXTERNAL_DIARIZER_BASE_URL=http://xiyu-diarizer:8000`（容器内网络）或 `http://localhost:8300`（本地）  
 3) diarizer 是否因为 `HF_TOKEN`/权限/下载超时而失败（看 diarizer 日志）
 
 ---

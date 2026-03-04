@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Support a multi-container, per-port TingWu deployment where the **frontend selects the backend base URL**, and speaker diarization is **best-effort** (unsupported backends **ignore** speaker instead of erroring or silently switching models).
+**Goal:** Support a multi-container, per-port Xiyu deployment where the **frontend selects the backend base URL**, and speaker diarization is **best-effort** (unsupported backends **ignore** speaker instead of erroring or silently switching models).
 
 **Architecture:** Frontend stores a selected `baseURL` → all API calls use that base URL → frontend probes `/api/v1/backend` to show capabilities → backend enforces `speaker_unsupported_behavior` (`error|fallback|ignore`) consistently across engine paths.
 
@@ -129,7 +129,7 @@ Commit changes.
 - Modify: `docker-compose.models.yml`
 
 **Steps:**
-1. Add env var to `x-tingwu-env`:
+1. Add env var to `x-xiyu-env`:
    - `SPEAKER_UNSUPPORTED_BEHAVIOR: ${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}`
 2. Ensure it applies to all services.
 3. Commit.
@@ -303,4 +303,3 @@ Commit changes.
 1. Merge branch into main.
 2. Run final verification.
 3. Push `origin/main`.
-

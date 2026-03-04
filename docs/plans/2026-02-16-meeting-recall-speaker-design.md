@@ -1,7 +1,7 @@
 # Meeting/Recall Transcription — Speaker-Friendly Output (Numeric Labels + Turns) — Design
 
 **Date:** 2026-02-16  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
 **Primary goal:** improve **final transcript accuracy & usability** for meeting/recall transcription where speakers usually **take turns** (overlap is rare), and the UI/business needs **clear speaker separation** like `说话人1/2/3`.
 
 ---
@@ -30,7 +30,7 @@
 
 ---
 
-## Current State (TingWu)
+## Current State (Xiyu)
 
 - Speaker diarization is supported only by some backends:
   - **PyTorchBackend** supports speaker via FunASR `spk_model` (`cam++`) and provides `sentence_info[].spk`.

@@ -3,7 +3,7 @@
  * Plan 8: 配置预设与模板
  */
 
-const STORAGE_PREFIX = 'tingwu_'
+const STORAGE_PREFIX = 'xiyu_'
 
 // 存储键
 export const STORAGE_KEYS = {

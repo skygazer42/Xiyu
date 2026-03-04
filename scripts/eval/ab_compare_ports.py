@@ -79,7 +79,7 @@ def _safe_filename(s: str) -> str:
 
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="A/B compare TingWu ports/URLs for one audio file (optionally compute CER/WER).",
+        description="A/B compare Xiyu ports/URLs for one audio file (optionally compute CER/WER).",
     )
     parser.add_argument("audio", type=str, help="Audio file path (wav/mp3/m4a/...).")
     parser.add_argument("--host", type=str, default="localhost", help="Host for --ports (default: localhost).")
@@ -236,4 +236,3 @@ def main(argv: Sequence[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

@@ -1,7 +1,7 @@
 # Speaker Fallback Diarization (Qwen3-friendly) — Design
 
 **Date:** 2026-02-16  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
 **Primary scenario:** 多端口多容器部署（`docker-compose.models.yml`），前端选择后端端口；当某些 ASR（如 Qwen3-ASR 1.7B）不支持说话人识别时，仍希望输出“说话人1/2/3…”。
 
 ---
@@ -9,7 +9,7 @@
 ## Problem
 
 - 会议转写场景通常需要「说话人区分」来提升可读性（说话人1/2/3…）。
-- 现有 TingWu 能力：
+- 现有 Xiyu 能力：
   - PyTorch/FunASR 支持 `with_speaker=true`（返回带 spk 的 `sentence_info`）。
   - Qwen3 remote backend (`src/models/backends/qwen3_remote.py`) 不支持说话人（`supports_speaker=False`），且返回 `sentence_info=[]`。
 - 当前行为（v1）在后端不支持说话人时可按配置 `ignore`：继续返回普通转写结果，不报错。
@@ -19,8 +19,8 @@
 
 ## Goals
 
-1) 当选定后端（例如 `tingwu-qwen3`）本身不支持 diarization 时，如果用户开启 `with_speaker=true`，系统可选地：
-   - 通过一个「辅助 diarization 服务」（建议：`tingwu-pytorch` 容器）得到时间戳 + 说话人分段；
+1) 当选定后端（例如 `xiyu-qwen3`）本身不支持 diarization 时，如果用户开启 `with_speaker=true`，系统可选地：
+   - 通过一个「辅助 diarization 服务」（建议：`xiyu-pytorch` 容器）得到时间戳 + 说话人分段；
    - 使用原后端（Qwen3）对每个说话人段落做转写；
    - 返回带 `sentences/speaker_turns/transcript` 的结果，标签为 **说话人1/2/3**（numeric）。
 2) 失败自动回退到现状：如果辅助服务不可用/超时/报错，保持 **ignore speaker**（不影响正常转写）。
@@ -43,7 +43,7 @@
 把“说话人分离”与“转写文本”解耦：
 
 - **Diarization provider（辅助服务）**：输出 `(start_ms, end_ms, speaker_id/speaker)` 的分句结果。
-  - 推荐直接复用 TingWu 的 PyTorch 容器 API：`POST /api/v1/transcribe` + `with_speaker=true`。
+  - 推荐直接复用 Xiyu 的 PyTorch 容器 API：`POST /api/v1/transcribe` + `with_speaker=true`。
 - **Primary ASR backend（原后端）**：只负责把音频片段转成文字（Qwen3）。
 
 ### Data flow
@@ -76,12 +76,12 @@
 新增 Settings/env（默认关闭）：
 
 - `SPEAKER_FALLBACK_DIARIZATION_ENABLE=false`
-- `SPEAKER_FALLBACK_DIARIZATION_BASE_URL=http://tingwu-pytorch:8000`
+- `SPEAKER_FALLBACK_DIARIZATION_BASE_URL=http://xiyu-pytorch:8000`
 - `SPEAKER_FALLBACK_DIARIZATION_TIMEOUT_S=30`
 - `SPEAKER_FALLBACK_MAX_TURN_DURATION_S=25`（限制单 turn 的最大时长，避免 Qwen3 超时）
 - `SPEAKER_FALLBACK_MAX_TURNS=200`（防止极端碎片化导致 N 次请求）
 
-建议只在 `tingwu-qwen3`（或其他不支持 speaker 的后端）容器中启用。
+建议只在 `xiyu-qwen3`（或其他不支持 speaker 的后端）容器中启用。
 
 ---
 
@@ -108,4 +108,3 @@
 - **性能**：turn 多会产生多次 Qwen3 调用 → `MAX_TURNS` 限制 + 合并 turns。
 - **准确性**：turn 切片可能截断上下文 → 可增加少量 padding（v2）。
 - **配置错误**：fallback base_url 指向不支持 speaker 的服务 → 失败后自动回退 ignore，且可选探测 `/api/v1/backend`。
-

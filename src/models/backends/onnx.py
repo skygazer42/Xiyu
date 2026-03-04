@@ -219,7 +219,7 @@ class ONNXBackend(ASRBackend):
         # IMPORTANT:
         # funasr-onnx Paraformer loads WAV paths via `librosa.load()`, which pulls in
         # scipy.interpolate/fitpack. In some minimal Docker images this import can
-        # fail with a RecursionError. TingWu already provides 16kHz mono PCM16LE
+        # fail with a RecursionError. Xiyu already provides 16kHz mono PCM16LE
         # bytes, so we bypass path loading completely by passing a waveform array.
         import numpy as np
 
@@ -263,7 +263,7 @@ class ONNXBackend(ASRBackend):
                     audio_f32 = _resample_linear(audio_f32, sr, 16000)
                 waveform = audio_f32
             else:
-                # TingWu internal: raw PCM16LE 16kHz mono
+                # Xiyu internal: raw PCM16LE 16kHz mono
                 pcm = data
                 if len(pcm) % 2 != 0:
                     pcm = pcm[: len(pcm) - 1]

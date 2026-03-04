@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add an external diarization service (`tingwu-diarizer`) and make TingWu produce consistent `speaker_turns` for *all* ASR backends by routing `with_speaker=true` through the external diarizer first, with safe fallback behavior.
+**Goal:** Add an external diarization service (`xiyu-diarizer`) and make Xiyu produce consistent `speaker_turns` for *all* ASR backends by routing `with_speaker=true` through the external diarizer first, with safe fallback behavior.
 
-**Architecture:** When `with_speaker=true` and external diarizer is enabled, TingWu calls `POST /api/v1/diarize` to fetch speaker segments → merges segments into turns → slices PCM16LE by turn → transcribes each turn with the selected ASR backend → formats `speaker_turns` + `transcript`. If diarizer fails: fall back to native speaker if supported, else ignore speaker.
+**Architecture:** When `with_speaker=true` and external diarizer is enabled, Xiyu calls `POST /api/v1/diarize` to fetch speaker segments → merges segments into turns → slices PCM16LE by turn → transcribes each turn with the selected ASR backend → formats `speaker_turns` + `transcript`. If diarizer fails: fall back to native speaker if supported, else ignore speaker.
 
 **Tech Stack:** Python, FastAPI, httpx, numpy, Docker/Compose, HuggingFace cache volumes, (diarizer) pyannote.audio.
 
@@ -13,7 +13,7 @@
 ## Status snapshot (already on main)
 
 - `with_speaker=true` outputs `speaker_turns` and numeric labels (engine + frontend).
-- Existing “speaker fallback diarization” exists (helper TingWu service), but is only for unsupported backends.
+- Existing “speaker fallback diarization” exists (helper Xiyu service), but is only for unsupported backends.
 - Multi-backend per-port deployment exists: `docker-compose.models.yml`.
 
 This plan adds a **new external diarizer service** and a **forced external speaker strategy** (opt-in via settings).
@@ -650,7 +650,7 @@ git commit -m "diarizer: return stable segments response"
 
 **Step 2: Build (optional)**
 
-Run: `docker build -f Dockerfile.diarizer -t tingwu-diarizer:latest .`  
+Run: `docker build -f Dockerfile.diarizer -t xiyu-diarizer:latest .`  
 Expected: build succeeds.
 
 **Step 3: Commit**
@@ -662,7 +662,7 @@ git commit -m "docker: add diarizer image (cuda12.4)"
 
 ---
 
-### Task 15: Add `tingwu-diarizer` service to `docker-compose.models.yml`
+### Task 15: Add `xiyu-diarizer` service to `docker-compose.models.yml`
 
 **Files:**
 - Modify: `docker-compose.models.yml`
@@ -670,7 +670,7 @@ git commit -m "docker: add diarizer image (cuda12.4)"
 **Step 1: Implement**
 
 Add a new service:
-- name: `tingwu-diarizer`
+- name: `xiyu-diarizer`
 - profile: `diarizer`
 - build: `Dockerfile.diarizer`
 - volumes: `huggingface-cache`, optional `./data`
@@ -686,12 +686,12 @@ Expected: exits 0.
 
 ```bash
 git add docker-compose.models.yml
-git commit -m "compose: add tingwu-diarizer service"
+git commit -m "compose: add xiyu-diarizer service"
 ```
 
 ---
 
-### Task 16: Plumb external diarizer env vars into all TingWu model services (opt-in)
+### Task 16: Plumb external diarizer env vars into all Xiyu model services (opt-in)
 
 **Files:**
 - Modify: `docker-compose.models.yml`
@@ -699,9 +699,9 @@ git commit -m "compose: add tingwu-diarizer service"
 
 **Step 1: Implement**
 
-In `x-tingwu-env`, add:
+In `x-xiyu-env`, add:
 - `SPEAKER_EXTERNAL_DIARIZER_ENABLE: ${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-false}`
-- `SPEAKER_EXTERNAL_DIARIZER_BASE_URL: ${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://tingwu-diarizer:8000}`
+- `SPEAKER_EXTERNAL_DIARIZER_BASE_URL: ${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://xiyu-diarizer:8000}`
 - `SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S: ${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}`
 - `SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}`
 - `SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}`
@@ -811,4 +811,3 @@ Expected: OK.
 **Step 3: Commit any last fixes**
 
 If anything was adjusted during verification, commit it with a focused message.
-

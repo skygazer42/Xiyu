@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     # 服务配置
-    app_name: str = "TingWu Speech Service"
+    app_name: str = "Xiyu Speech Service"
     version: str = "1.0.0"
     debug: bool = False
     host: str = "0.0.0.0"
@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # Speaker fallback diarization (辅助说话人分离)
     # ------------------------------------------------------------
     # 当当前后端不支持说话人识别（例如 Qwen3-ASR），但用户请求 with_speaker=true 时：
-    # - 可选：调用一个“辅助 TingWu 服务”（通常是 tingwu-pytorch）获取说话人分段
+    # - 可选：调用一个“辅助 Xiyu 服务”（通常是 xiyu-pytorch）获取说话人分段
     # - 然后按说话人 turn 切片用当前后端转写，从而输出说话人1/2/3...
     # 失败会自动回退到 speaker_unsupported_behavior 的逻辑（推荐 ignore）。
     speaker_fallback_diarization_enable: bool = False
@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     whisper_language: Optional[str] = "zh"
     # Set to a persistent directory (e.g. /app/data/models/whisper) to cache weights.
     whisper_download_root: str = ""
-    # Router-only: prefer proxying to an existing TingWu whisper service container
+    # Router-only: prefer proxying to an existing Xiyu whisper service container
     # (avoid loading weights twice).
     whisper_service_base_url: str = ""
     whisper_service_timeout_s: float = 600.0

@@ -44,11 +44,11 @@ def test_whisper_backend_hotwords_are_passed_via_initial_prompt(monkeypatch):
     backend.load()
 
     pcm = (np.zeros(16000, dtype=np.int16)).tobytes()
-    _ = backend.transcribe(pcm, hotwords="OpenAI\nTingWu")
+    _ = backend.transcribe(pcm, hotwords="OpenAI\nXiyu")
 
     called_kwargs = fake_model.transcribe.call_args.kwargs
     assert "initial_prompt" in called_kwargs
     prompt = str(called_kwargs["initial_prompt"])
     assert "专有名词" in prompt
     assert "OpenAI" in prompt
-    assert "TingWu" in prompt
+    assert "Xiyu" in prompt

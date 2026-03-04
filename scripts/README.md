@@ -10,8 +10,8 @@
 | `paraformer-zh-onnx` | ONNX 优化版本 | `pip install funasr-onnx` |
 | `Fun-ASR-Nano-2512` | 通义新模型 (0.8B) | `funasr` + 自动下载 |
 | `SenseVoice-Small` | 极速模型 | `funasr` + 自动下载 |
-| `backend-qwen3` | 通过 TingWu 后端抽象层调用远程 Qwen3-ASR（vLLM） | 需先启动 Qwen3-ASR 服务 |
-| `backend-vibevoice` | 通过 TingWu 后端抽象层调用远程 VibeVoice-ASR（vLLM） | 需先启动 VibeVoice-ASR 服务 |
+| `backend-qwen3` | 通过 Xiyu 后端抽象层调用远程 Qwen3-ASR（vLLM） | 需先启动 Qwen3-ASR 服务 |
+| `backend-vibevoice` | 通过 Xiyu 后端抽象层调用远程 VibeVoice-ASR（vLLM） | 需先启动 VibeVoice-ASR 服务 |
 | `backend-router` | 自动路由（短音频 Qwen3 / 长音频或说话人 VibeVoice） | 需先启动上述服务 |
 
 ## 使用方法

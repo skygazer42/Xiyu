@@ -1,7 +1,7 @@
 # Advanced `asr_options` Editor + Exports + Qwen3 Postprocess Defaults — Design
 
 **Date:** 2026-02-16  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
 **Primary scenario:** 多端口多模型（`docker-compose.models.yml`）+ 前端选择后端端口做转写 A/B，对会议/回忆转写要“可读、可导出、可调参”。
 
 ---
@@ -83,4 +83,3 @@
 
 - WebVTT voice tags (`<v Speaker>`) 属于 WebVTT 的常见写法（很多播放器/解析器支持）。  
 - vLLM OpenAI-compatible “Speech-to-Text” 文档显示 Qwen3-ASR 属于 speech-to-text 模型类别；并未提供 diarization 能力描述。
-

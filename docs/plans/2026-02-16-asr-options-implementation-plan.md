@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a validated `asr_options` JSON form field to TingWu HTTP transcription APIs to tune preprocessing/chunking/backend/postprocess per request (without restarting, and without mutating global settings).
+**Goal:** Add a validated `asr_options` JSON form field to Xiyu HTTP transcription APIs to tune preprocessing/chunking/backend/postprocess per request (without restarting, and without mutating global settings).
 
 **Architecture:** Parse `asr_options` once in the API route → apply `preprocess` overrides while decoding upload → pass the parsed dict to the engine → engine derives per-request chunker + post-processor + backend kwargs.
 
@@ -179,4 +179,3 @@ Add a short section under “API / 多模型按需启动” showing:
 git add README.md
 git commit -m "docs: document asr_options request tuning"
 ```
-

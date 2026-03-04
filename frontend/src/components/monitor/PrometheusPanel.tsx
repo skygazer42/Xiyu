@@ -20,7 +20,7 @@ export interface PrometheusPanelProps extends React.HTMLAttributes<HTMLDivElemen
 
 function buildPrometheusConfig(target: string) {
   return `scrape_configs:
-  - job_name: 'tingwu'
+  - job_name: 'xiyu'
     scrape_interval: 15s
     static_configs:
       - targets: ['${target}']
@@ -29,22 +29,22 @@ function buildPrometheusConfig(target: string) {
 
 const GRAFANA_DASHBOARD = {
   dashboard: {
-    title: "TingWu ASR Monitor",
+    title: "Xiyu ASR Monitor",
     panels: [
       {
         title: "Total Requests",
         type: "stat",
-        targets: [{ expr: 'tingwu_requests_total' }],
+        targets: [{ expr: 'xiyu_requests_total' }],
       },
       {
         title: "Success Rate",
         type: "gauge",
-        targets: [{ expr: 'tingwu_requests_successful_total / tingwu_requests_total * 100' }],
+        targets: [{ expr: 'xiyu_requests_successful_total / xiyu_requests_total * 100' }],
       },
       {
         title: "Average RTF",
         type: "timeseries",
-        targets: [{ expr: 'tingwu_rtf_avg' }],
+        targets: [{ expr: 'xiyu_rtf_avg' }],
       },
     ],
   },
@@ -101,7 +101,7 @@ function PrometheusPanel({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'tingwu-grafana-dashboard.json'
+    a.download = 'xiyu-grafana-dashboard.json'
     a.click()
     URL.revokeObjectURL(url)
     toast.success('Grafana Dashboard 已下载')

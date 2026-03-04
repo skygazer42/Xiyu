@@ -32,7 +32,7 @@ from src.core.llm.roles import get_role
 from src.core.ensemble import (  # noqa: PLC0415
     CandidateResult,
     get_ensemble_targets,
-    _call_tingwu_transcribe,
+    _call_xiyu_transcribe,
     _clean_text_for_llm,
     _llm_polish_turn_texts,
     _merge_asr_options,
@@ -242,7 +242,7 @@ async def transcribe_all_models(
             want_speaker = bool(with_speaker) and (name == base_backend)
             try:
                 async with sem:
-                    http_status, obj = await _call_tingwu_transcribe(
+                    http_status, obj = await _call_xiyu_transcribe(
                         client,
                         base_url=base_url,
                         file_bytes=file_bytes,
@@ -266,7 +266,7 @@ async def transcribe_all_models(
                     elapsed_ms=_now_ms() - t0,
                     result_obj=obj if isinstance(obj, dict) else None,
                     cleaned_text=cleaned,
-                    error=None if ok else f"TingWu code={code!r}",
+                    error=None if ok else f"Xiyu code={code!r}",
                 )
             except Exception as e:
                 return CandidateResult(

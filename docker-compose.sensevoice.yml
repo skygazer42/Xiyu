@@ -5,12 +5,12 @@ version: '3.8'
 # 10秒音频仅需 70ms，比 Whisper-Large 快 15 倍
 
 services:
-  tingwu-sensevoice:
+  xiyu-sensevoice:
     build:
       context: .
       dockerfile: Dockerfile
-    image: tingwu-speech-service:sensevoice
-    container_name: tingwu-service-sensevoice
+    image: xiyu-speech-service:sensevoice
+    container_name: xiyu-service-sensevoice
     ports:
       - "${PORT:-8000}:8000"
     volumes:
@@ -31,7 +31,7 @@ services:
       - HOTWORDS_THRESHOLD=${HOTWORDS_THRESHOLD:-0.85}
       - SPEAKER_UNSUPPORTED_BEHAVIOR=${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
       - SPEAKER_EXTERNAL_DIARIZER_ENABLE=${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-false}
-      - SPEAKER_EXTERNAL_DIARIZER_BASE_URL=${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://tingwu-diarizer:8000}
+      - SPEAKER_EXTERNAL_DIARIZER_BASE_URL=${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://xiyu-diarizer:8000}
       - SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S=${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}

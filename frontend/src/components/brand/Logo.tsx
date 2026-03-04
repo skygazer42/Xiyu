@@ -16,8 +16,8 @@ const sizeMap = {
 }
 
 /**
- * TingWu Logo - 听悟
- * 结合声波与耳朵的设计，象征"听"与"悟"
+ * Xiyu Logo - 悉语
+ * 结合声波与耳朵的设计，象征"悉"与"语"
  */
 function Logo({
   className,
@@ -36,7 +36,7 @@ function Logo({
         viewBox="0 0 48 48"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
-        aria-label="TingWu Logo"
+        aria-label="Xiyu Logo"
         {...props}
       >
         {/* 背景圆形 */}
@@ -105,13 +105,13 @@ function Logo({
             className="font-bold tracking-tight text-foreground"
             style={{ fontSize: textSize }}
           >
-            听悟
+            悉语
           </span>
           <span
             className="text-muted-foreground font-medium"
             style={{ fontSize: textSize * 0.5 }}
           >
-            TingWu
+            Xiyu
           </span>
         </div>
       )}
@@ -135,7 +135,7 @@ function LogoIcon({
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
-      aria-label="TingWu"
+      aria-label="Xiyu"
       {...props}
     >
       <circle

@@ -2,7 +2,7 @@
 Precision merge for overlapped ASR chunks (text_accu).
 
 This module implements a CapsWriter-inspired "precision" merge mode using
-time-windowed SequenceMatcher alignment. TingWu backends do not provide stable
+time-windowed SequenceMatcher alignment. Xiyu backends do not provide stable
 token timestamps across all models, so we approximate timestamps at the
 character level (linear interpolation over a chunk's time range).
 

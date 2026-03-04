@@ -115,7 +115,7 @@ function ConfigPresets({
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `tingwu-presets-${Date.now()}.json`
+    a.download = `xiyu-presets-${Date.now()}.json`
     a.click()
     URL.revokeObjectURL(url)
     toast.success("预设已导出")

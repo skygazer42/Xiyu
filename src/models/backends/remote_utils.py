@@ -1,6 +1,6 @@
 """Utilities for remote ASR backends.
 
-TingWu's API layer converts uploads to 16kHz, 16-bit, mono PCM (s16le) bytes.
+Xiyu's API layer converts uploads to 16kHz, 16-bit, mono PCM (s16le) bytes.
 Remote ASR services typically expect a container format (e.g. WAV) via HTTP.
 """
 
@@ -44,7 +44,7 @@ def audio_input_to_wav_bytes(
 ) -> Tuple[bytes, float]:
     """Convert supported audio input into (wav_bytes, duration_seconds).
 
-    - bytes: treated as TingWu internal PCM16LE 16k mono.
+    - bytes: treated as Xiyu internal PCM16LE 16k mono.
     - path/str: treated as an existing audio container; bytes are read and returned as-is.
       Duration is best-effort (WAV only).
     """
@@ -74,4 +74,3 @@ def audio_input_to_wav_bytes(
         return wav, duration_s
 
     raise TypeError(f"Unsupported audio_input type: {type(audio_input)!r}")
-

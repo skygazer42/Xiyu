@@ -1,6 +1,6 @@
 # 部署指南（从 0 → 全部跑起来）
 
-本指南面向「第一次部署 TingWu」的用户，目标是让你从一台全新的机器出发，最终跑起一套可用的转写服务：
+本指南面向「第一次部署 Xiyu」的用户，目标是让你从一台全新的机器出发，最终跑起一套可用的转写服务：
 
 - **Linux + NVIDIA GPU + Docker Compose（推荐）**
 - **macOS / Windows + Docker Desktop（CPU 为主）**
@@ -16,8 +16,8 @@
 ### Linux（有 NVIDIA GPU，推荐）
 
 ```bash
-git clone https://github.com/skygazer42/TingWu.git
-cd TingWu
+git clone https://github.com/skygazer42/Xiyu.git
+cd Xiyu
 cp .env.example .env
 
 # 需要 GPU 容器运行环境（见下文“Linux GPU 从 0”）
@@ -31,8 +31,8 @@ curl -sS http://localhost:8000/health
 ### macOS / Windows（Docker Desktop，CPU）
 
 ```bash
-git clone https://github.com/skygazer42/TingWu.git
-cd TingWu
+git clone https://github.com/skygazer42/Xiyu.git
+cd Xiyu
 cp .env.example .env
 
 docker compose -f docker-compose.cpu.yml up -d --build
@@ -61,7 +61,7 @@ curl -sS http://localhost:8000/health
 有三种常见方式（部署复杂度从低到高）：
 
 1) **后端原生支持 speaker**（例如 FunASR PyTorch 的带 spk 管线）  
-2) **External diarizer（推荐会议稳定性）**：启动 `tingwu-diarizer`（pyannote），让任意 ASR 后端都能输出说话人段落  
+2) **External diarizer（推荐会议稳定性）**：启动 `xiyu-diarizer`（pyannote），让任意 ASR 后端都能输出说话人段落  
 3) **Fallback diarization**：用一个“辅助后端”帮忙做分段，另一个后端负责转写文本
 
 更多细节见 `docs/MODELS.md`。
@@ -131,7 +131,7 @@ docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
 
 看到显卡信息即表示 OK。
 
-> TingWu 的 GPU 镜像基于 `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime`（CUDA 12.4）。  
+> Xiyu 的 GPU 镜像基于 `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime`（CUDA 12.4）。  
 > 如果你的驱动版本过老，可能会出现 “CUDA driver version is insufficient”。
 
 ---
@@ -141,8 +141,8 @@ docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
 ### 4.1 拉取仓库
 
 ```bash
-git clone https://github.com/skygazer42/TingWu.git
-cd TingWu
+git clone https://github.com/skygazer42/Xiyu.git
+cd Xiyu
 ```
 
 ### 4.2 创建 `.env`
@@ -243,7 +243,7 @@ python scripts/local_stack.py stop
 推荐把主服务与 diarizer 分别放在不同 venv（避免依赖冲突/体积过大）：
 
 ```bash
-TINGWU_PYTHON=./.venv/bin/python \
+XIYU_PYTHON=./.venv/bin/python \
 DIARIZER_PYTHON=./.venv-diarizer/bin/python \
 python scripts/local_stack.py start --mode meeting
 ```
@@ -257,4 +257,3 @@ python scripts/local_stack.py start --mode meeting
 - 多模型容器（每个后端一个端口）：`docs/MODELS.md`
 - 常见问题排障：`docs/TROUBLESHOOTING.md`
 - API 参考：`docs/API.md`
-

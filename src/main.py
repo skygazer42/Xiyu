@@ -1,4 +1,4 @@
-"""TingWu Speech Service 主入口"""
+"""Xiyu Speech Service 主入口"""
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -175,7 +175,7 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    parser = argparse.ArgumentParser(description="Run TingWu Speech Service (FastAPI)")
+    parser = argparse.ArgumentParser(description="Run Xiyu Speech Service (FastAPI)")
     parser.add_argument("--host", default=str(settings.host), help="Bind host (default: settings.host)")
     parser.add_argument("--port", type=int, default=int(settings.port), help="Bind port (default: settings.port)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload (dev only)")

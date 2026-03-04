@@ -118,7 +118,7 @@ class VibeVoiceRemoteBackend(ASRBackend):
                         f"Please transcribe this audio and return JSON with keys: {', '.join(show_keys)}. {json_only}"
                     )
         else:
-            # NOTE: When using external diarizer, TingWu already owns the speaker
+            # NOTE: When using external diarizer, Xiyu already owns the speaker
             # segmentation and only needs plain text per segment. Asking the
             # model to output JSON often results in malformed/incomplete JSON
             # (e.g. the model starts a JSON string but never closes it), which
@@ -361,7 +361,7 @@ def _maybe_extract_allowed_max_tokens(body: str) -> Optional[int]:
 
 
 def _postprocess_vibevoice_content(content: str, *, with_speaker: bool) -> Dict[str, Any]:
-    """Convert vLLM chat completion `content` into TingWu backend output.
+    """Convert vLLM chat completion `content` into Xiyu backend output.
 
     When `with_speaker` is False (typical external diarizer pipeline), we prefer
     returning plain text to avoid brittle JSON formatting.

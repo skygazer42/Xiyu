@@ -564,7 +564,7 @@ class TranscriptionEngine:
         *,
         sample_rate: int = 16000,
     ) -> int:
-        """Best-effort estimate audio duration (ms) from common TingWu inputs.
+        """Best-effort estimate audio duration (ms) from common Xiyu inputs.
 
         - bytes: usually PCM16LE 16k mono (API standardized). If it looks like WAV, parse header.
         - str/Path: if it's a WAV file, parse via stdlib `wave` (no ffmpeg dependency).
@@ -1575,7 +1575,7 @@ class TranscriptionEngine:
         """Best-effort speaker diarization fallback for non-diarizing backends.
 
         Returns:
-            A TingWu-style result dict with speaker fields when successful, otherwise None.
+            A Xiyu-style result dict with speaker fields when successful, otherwise None.
         """
         base_url = str(getattr(settings, "speaker_fallback_diarization_base_url", "") or "").rstrip("/")
         if not base_url:
@@ -1591,7 +1591,7 @@ class TranscriptionEngine:
             return None
         wav_bytes = pcm16le_to_wav_bytes(pcm16le, sample_rate=16000, channels=1, sampwidth=2)
 
-        # Request diarization from the helper TingWu service (usually tingwu-pytorch).
+        # Request diarization from the helper Xiyu service (usually xiyu-pytorch).
         diar_asr_options: Dict[str, Any] = {}
         label_style = speaker_options.get("label_style")
         if isinstance(label_style, str) and label_style.strip().lower() in ("zh", "numeric"):
@@ -1607,7 +1607,7 @@ class TranscriptionEngine:
             data["asr_options"] = json.dumps(diar_asr_options, ensure_ascii=False)
 
         files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
-        # The helper TingWu service is usually on localhost/docker networks.
+        # The helper Xiyu service is usually on localhost/docker networks.
         # Avoid inheriting proxy env vars that can break httpx client init.
         async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
             resp = await client.post(f"{base_url}/api/v1/transcribe", data=data, files=files)
@@ -1790,7 +1790,7 @@ class TranscriptionEngine:
         """Best-effort forced diarization via an external diarizer service.
 
         Returns:
-            A TingWu-style result dict with speaker fields when successful, otherwise None.
+            A Xiyu-style result dict with speaker fields when successful, otherwise None.
         """
         base_url = str(getattr(settings, "speaker_external_diarizer_base_url", "") or "").rstrip("/")
         if not base_url:

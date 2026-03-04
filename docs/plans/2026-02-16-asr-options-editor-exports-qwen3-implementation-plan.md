@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 在 TingWu 前端加入“高级 `asr_options` 编辑器 + 常用模板”、增强导出格式（MD/VTT/DOC），并补齐后端对 `spoken_punc_enable` / `acronym_merge_enable` 的全局默认支持，用于 Qwen3-ASR 等后端的准确率/可读性优化。
+**Goal:** 在 Xiyu 前端加入“高级 `asr_options` 编辑器 + 常用模板”、增强导出格式（MD/VTT/DOC），并补齐后端对 `spoken_punc_enable` / `acronym_merge_enable` 的全局默认支持，用于 Qwen3-ASR 等后端的准确率/可读性优化。
 
 **Architecture:** UI → 生成/校验 asr_options → HTTP multipart 发送 `asr_options` JSON → backend allowlist 解析 → engine request-scoped `TextPostProcessor` 生效 → response 包含 `speaker_turns/text_accu` → ExportMenu 输出多格式。
 
@@ -168,7 +168,7 @@ Commit message: `config: add spoken_punc/acronym defaults`
 **Files:**
 - Modify: `docker-compose.models.yml`
 
-**Idea:** for `tingwu-qwen3` set `SPACING_CJK_ASCII_ENABLE=true`, `PUNC_MERGE_ENABLE=true`, etc.
+**Idea:** for `xiyu-qwen3` set `SPACING_CJK_ASCII_ENABLE=true`, `PUNC_MERGE_ENABLE=true`, etc.
 
 ---
 
@@ -208,4 +208,3 @@ Steps:
 1. Merge branch
 2. Re-run Task 17/18 verifications
 3. Push `origin/main`
-

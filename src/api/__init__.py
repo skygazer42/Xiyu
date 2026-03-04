@@ -1,4 +1,4 @@
-"""TingWu API package.
+"""Xiyu API package.
 
 Keep imports lightweight so utility modules under `src.api.*` (e.g. `asr_options`)
 can be imported without requiring FastAPI route dependencies at import time.

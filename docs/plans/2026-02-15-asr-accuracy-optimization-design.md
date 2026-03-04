@@ -1,8 +1,8 @@
-# TingWu ASR Accuracy Optimization (File Transcription) — Design
+# Xiyu ASR Accuracy Optimization (File Transcription) — Design
 
 **Date:** 2026-02-15  
 **Owner:** Codex (with user approval)  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
 **Reference projects:** CapsWriter-Offline (`/Users/luke/code/CapsWriter-Offline`), FunASR_API, SenseVoiceApi
 
 ## Goal
@@ -22,7 +22,7 @@ Time/latency is explicitly **not** the primary constraint for this track.
 - Replacing ASR models or training/fine-tuning models (may be later “upper bound” work)
 - Achieving perfect sentence-level timestamp deduplication (nice-to-have; focus first on final text)
 
-## Current state (TingWu)
+## Current state (Xiyu)
 
 - File upload APIs convert media to **16kHz mono PCM16LE bytes** via FFmpeg (`src/api/dependencies.py`).
 - `TranscriptionEngine` supports multiple backends, hotword/rule corrections, optional LLM polish (`src/core/engine.py`).

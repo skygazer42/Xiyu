@@ -1,11 +1,11 @@
 """Local Whisper backend (openai-whisper).
 
 This backend runs Whisper inference locally (GPU preferred) and adapts outputs
-to TingWu's standard backend contract:
+to Xiyu's standard backend contract:
   - returns {"text": str, "sentence_info": [{text,start,end}, ...]}
 
 Input handling:
-  - TingWu's API converts uploads into 16kHz mono PCM16LE bytes.
+  - Xiyu's API converts uploads into 16kHz mono PCM16LE bytes.
   - Whisper expects either a file path or a float waveform, so we convert when
     receiving raw PCM bytes.
 """

@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a local GPU Whisper backend (`ASR_BACKEND=whisper`) and a `tingwu-whisper` container, while aligning TingWu service images to CUDA 12.4 by default.
+**Goal:** Add a local GPU Whisper backend (`ASR_BACKEND=whisper`) and a `xiyu-whisper` container, while aligning Xiyu service images to CUDA 12.4 by default.
 
-**Architecture:** Implement `WhisperBackend(ASRBackend)` using `openai-whisper` (PyTorch, GPU) that converts TingWu PCM16LE bytes into float waveform and returns TingWu-standard `text + sentence_info`. Update Settings + backend registry + model manager. Update Dockerfiles to use `pytorch/pytorch:*cuda12.4*` runtime base image and update compose + frontend presets to expose the new container.
+**Architecture:** Implement `WhisperBackend(ASRBackend)` using `openai-whisper` (PyTorch, GPU) that converts Xiyu PCM16LE bytes into float waveform and returns Xiyu-standard `text + sentence_info`. Update Settings + backend registry + model manager. Update Dockerfiles to use `pytorch/pytorch:*cuda12.4*` runtime base image and update compose + frontend presets to expose the new container.
 
 **Tech Stack:** FastAPI, PyTorch, openai-whisper, Docker/Compose, React (Vite), TanStack Query.
 
@@ -20,7 +20,7 @@
 
 **Step 1: Decide base tag**
 
-Use a consistent base for all TingWu service images, e.g.:
+Use a consistent base for all Xiyu service images, e.g.:
 - `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime`
 
 **Step 2: Write it down**
@@ -294,7 +294,7 @@ Prefer `pip install -r requirements.txt` (no `--prefix=/install` copy) to avoid 
 
 ```bash
 git add Dockerfile
-git commit -m "docker: use cuda12.4 pytorch base for tingwu image"
+git commit -m "docker: use cuda12.4 pytorch base for xiyu image"
 ```
 
 ---
@@ -340,15 +340,15 @@ git commit -m "docker: align gguf image to cuda12.4 base"
 
 ---
 
-### Task 10: Update `docker-compose.models.yml` to add `tingwu-whisper`
+### Task 10: Update `docker-compose.models.yml` to add `xiyu-whisper`
 
 **Files:**
 - Modify: `docker-compose.models.yml`
 
 **Step 1: Add service**
 
-Add a new service similar to `tingwu-pytorch`:
-- name: `tingwu-whisper`
+Add a new service similar to `xiyu-pytorch`:
+- name: `xiyu-whisper`
 - profile: `["whisper"]`
 - port: `${PORT_WHISPER:-8105}:8000`
 - env:
@@ -361,7 +361,7 @@ Add a new service similar to `tingwu-pytorch`:
 
 ```bash
 git add docker-compose.models.yml
-git commit -m "compose: add tingwu-whisper service"
+git commit -m "compose: add xiyu-whisper service"
 ```
 
 ---
@@ -415,7 +415,7 @@ git commit -m "frontend: add whisper preset backend"
 - Modify: `docs/API.md`
 
 **Steps:**
-- Mention `tingwu-whisper` in multi-model deployment section (ports/profiles).
+- Mention `xiyu-whisper` in multi-model deployment section (ports/profiles).
 - Clarify `/api/v1/asr` is “Whisper ASR WebService compatible response format” (not necessarily an actual Whisper model).
 - Add `whisper` to ASR_BACKEND list in docs.
 
@@ -449,8 +449,8 @@ No commit unless fixes were required.
 - (none)
 
 **Steps:**
-- Build: `docker compose -f docker-compose.models.yml --profile whisper build tingwu-whisper`
-- Run: `docker compose -f docker-compose.models.yml --profile whisper up -d tingwu-whisper`
+- Build: `docker compose -f docker-compose.models.yml --profile whisper build xiyu-whisper`
+- Run: `docker compose -f docker-compose.models.yml --profile whisper up -d xiyu-whisper`
 - Check: `curl http://localhost:8105/health`
 - Check backend info: `curl http://localhost:8105/api/v1/backend`
 

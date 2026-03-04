@@ -41,7 +41,7 @@ def _speaker_prefix(seg: Dict[str, Any]) -> str:
 
 
 def pick_timeline_segments(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Pick the best timeline segments from a TingWu-style response dict.
+    """Pick the best timeline segments from a Xiyu-style response dict.
 
     Priority:
     1. `sentences` (preferred: usually more fine-grained, best for subtitles)
@@ -96,11 +96,10 @@ def generate_srt(segments: Sequence[Dict[str, Any]]) -> str:
 
 
 def generate_srt_from_result(obj: Dict[str, Any]) -> Optional[str]:
-    """Generate SRT content from a TingWu-style response dict."""
+    """Generate SRT content from a Xiyu-style response dict."""
     segments = pick_timeline_segments(obj)
     if not segments:
         return None
 
     srt = generate_srt(segments)
     return srt if srt.strip() else None
-

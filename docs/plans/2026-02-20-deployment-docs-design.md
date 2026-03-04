@@ -1,14 +1,14 @@
 # Deployment Docs (From Zero → Full Stack) — Design
 
 **Date:** 2026-02-20  
-**Scope:** TingWu (`/Users/luke/code/tingwu`)  
+**Scope:** Xiyu (`/Users/luke/code/xiyu`)  
 **Primary goal:** ship complete deployment documentation that takes a user **from 0 to a working full stack**:
 
 - Linux + NVIDIA GPU (Docker Compose recommended path)
 - macOS / Windows (Docker Desktop; CPU-first path)
 - Local Python (no Docker) option, including **one-command meeting stack** launcher
 - Multi-model “one backend per port” deployment (`docker-compose.models.yml`)
-- Remote ASR servers (Qwen3-ASR / VibeVoice-ASR) + TingWu wrappers
+- Remote ASR servers (Qwen3-ASR / VibeVoice-ASR) + Xiyu wrappers
 - Caching strategy (weights in volumes/host mounts, not baked into images)
 
 ---
@@ -31,7 +31,7 @@
    - Windows can be CPU (Docker Desktop) or GPU (WSL2 + NVIDIA), but this needs clear disclaimers.
 
 3) **Full stack is multi-layer**
-   - TingWu service(s) vs remote ASR servers.
+   - Xiyu service(s) vs remote ASR servers.
    - Speaker diarization may come from backend native speaker models OR an external diarizer service.
 
 ---
@@ -84,7 +84,7 @@ Multi-backend and “full stack” content:
 - `docker-compose.models.yml` profiles and ports (including `--profile all`)
 - Whisper large download caching
 - Qwen3-ASR and VibeVoice-ASR as “remote OpenAI-compatible servers”
-- How TingWu wrappers connect to them
+- How Xiyu wrappers connect to them
 - Speaker strategies (native, external diarizer, fallback diarization)
 
 ### 3) `docs/TROUBLESHOOTING.md`
@@ -109,4 +109,3 @@ High-signal troubleshooting checklist:
   - switch backends by port + Base URL
   - enable speaker output via external diarizer
   - avoid re-downloading weights (volumes/mounts)
-
