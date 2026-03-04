@@ -1,6 +1,7 @@
 """转写 API 路由"""
 import asyncio
 import logging
+import time
 from typing import Optional, List
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
 
@@ -55,6 +56,7 @@ async def transcribe_audio(
     metrics.increment_requests()
 
     if apply_llm and llm_role in _ENSEMBLE_LLM_ROLES:
+        metrics.increment_failure()
         raise HTTPException(
             status_code=400,
             detail=(
@@ -67,8 +69,10 @@ async def transcribe_audio(
     try:
         parsed_asr_options = parse_asr_options(asr_options)
     except ValueError as e:
+        metrics.increment_failure()
         raise HTTPException(status_code=400, detail=str(e))
 
+    t0 = time.time()
     try:
         preprocess_options = (parsed_asr_options or {}).get("preprocess")
         async for audio_bytes in process_audio_file(file, preprocess_options=preprocess_options):
@@ -85,6 +89,7 @@ async def transcribe_audio(
             # 更新指标
             audio_duration = len(audio_bytes) / 2 / 16000  # 16bit, 16kHz
             metrics.add_audio_duration(audio_duration)
+            metrics.add_processing_time(time.time() - t0)
             metrics.increment_success()
 
             srt: Optional[str] = None
@@ -143,9 +148,9 @@ async def transcribe_batch(
     if not files:
         raise HTTPException(status_code=400, detail="请上传至少一个音频文件")
 
-    metrics.increment_requests()
-
     if apply_llm and llm_role in _ENSEMBLE_LLM_ROLES:
+        metrics.increment_requests()
+        metrics.increment_failure()
         raise HTTPException(
             status_code=400,
             detail=(
@@ -158,6 +163,8 @@ async def transcribe_batch(
     try:
         parsed_asr_options = parse_asr_options(asr_options)
     except ValueError as e:
+        metrics.increment_requests()
+        metrics.increment_failure()
         raise HTTPException(status_code=400, detail=str(e))
 
     results: List[BatchTranscribeItem] = []
@@ -166,6 +173,10 @@ async def transcribe_batch(
     async def process_single_file(index: int, file: UploadFile) -> BatchTranscribeItem:
         """处理单个文件"""
         async with semaphore:
+            # Metrics semantics: count each file as a request, so batch mode matches
+            # single-file mode.
+            metrics.increment_requests()
+            t0 = time.time()
             try:
                 preprocess_options = (parsed_asr_options or {}).get("preprocess")
                 async for audio_bytes in process_audio_file(file, preprocess_options=preprocess_options):
@@ -182,6 +193,8 @@ async def transcribe_batch(
                     # 更新指标
                     audio_duration = len(audio_bytes) / 2 / 16000
                     metrics.add_audio_duration(audio_duration)
+                    metrics.add_processing_time(time.time() - t0)
+                    metrics.increment_success()
 
                     return BatchTranscribeItem(
                         index=index,
@@ -202,6 +215,7 @@ async def transcribe_batch(
                         ),
                     )
             except Exception as e:
+                metrics.increment_failure()
                 logger.error(f"Batch item {index} failed: {e}")
                 return BatchTranscribeItem(
                     index=index,
@@ -217,11 +231,6 @@ async def transcribe_batch(
     # 统计结果
     success_count = sum(1 for r in results if r.success)
     failed_count = len(results) - success_count
-
-    if success_count > 0:
-        metrics.increment_success()
-    if failed_count > 0:
-        metrics.increment_failure()
 
     return BatchTranscribeResponse(
         code=0 if failed_count == 0 else 1,
@@ -253,6 +262,7 @@ async def transcribe_all_models_api(
     metrics.increment_requests()
 
     if apply_llm and llm_role not in _ENSEMBLE_LLM_ROLES:
+        metrics.increment_failure()
         raise HTTPException(
             status_code=400,
             detail=(
@@ -268,6 +278,7 @@ async def transcribe_all_models_api(
         metrics.increment_failure()
         raise HTTPException(status_code=400, detail=str(e))
 
+    t0 = time.time()
     try:
         # Read once; reuse for multi-backend HTTP fan-out.
         file_bytes = await file.read()
@@ -294,6 +305,34 @@ async def transcribe_all_models_api(
             except Exception as e:
                 logger.warning("Generate SRT for ensemble final failed (ignored): %s", e)
 
+        # Best-effort: derive audio duration from timestamps so avg_rtf is meaningful
+        # even when the uploaded bytes are not PCM.
+        try:
+            final_obj = out.get("final") if isinstance(out, dict) else None
+            duration_s = 0.0
+            if isinstance(final_obj, dict):
+                sentences = final_obj.get("sentences")
+                if isinstance(sentences, list) and len(sentences) > 0:
+                    last = sentences[-1]
+                    last_end = last.get("end") if isinstance(last, dict) else None
+                    if isinstance(last_end, (int, float)) and last_end > 0:
+                        duration_s = float(last_end) / 1000.0
+
+                if duration_s <= 0:
+                    turns = final_obj.get("speaker_turns")
+                    if isinstance(turns, list) and len(turns) > 0:
+                        last = turns[-1]
+                        last_end = last.get("end") if isinstance(last, dict) else None
+                        if isinstance(last_end, (int, float)) and last_end > 0:
+                            duration_s = float(last_end) / 1000.0
+
+            if duration_s > 0:
+                metrics.add_audio_duration(duration_s)
+        except Exception:
+            # Metrics must never break the response.
+            pass
+
+        metrics.add_processing_time(time.time() - t0)
         metrics.increment_success()
         return EnsembleTranscribeResponse(**out)
     except HTTPException:

@@ -40,11 +40,10 @@ export default function MonitorPage() {
   }
 
   // 计算成功率
-  const successRate = metrics
-    ? metrics.total_requests > 0
-      ? ((metrics.successful_requests / metrics.total_requests) * 100).toFixed(1)
-      : '100.0'
-    : '-'
+  const successRate =
+    metrics && metrics.total_requests > 0
+      ? (metrics.successful_requests / metrics.total_requests) * 100
+      : null
 
   // 饼图数据
   const pieData = metrics
@@ -125,12 +124,14 @@ export default function MonitorPage() {
             <MetricCard
               icon={CheckCircle}
               label="成功率"
-              value={`${successRate}%`}
+              value={successRate === null ? '-' : `${successRate.toFixed(1)}%`}
               loading={metricsQuery.isLoading}
               valueClassName={
-                Number(successRate) >= 95
+                successRate === null
+                  ? undefined
+                  : successRate >= 95
                   ? 'text-green-600'
-                  : Number(successRate) >= 80
+                  : successRate >= 80
                     ? 'text-yellow-600'
                     : 'text-red-600'
               }
@@ -138,7 +139,7 @@ export default function MonitorPage() {
             <MetricCard
               icon={Zap}
               label="平均 RTF"
-              value={metrics ? metrics.avg_rtf.toFixed(3) : '-'}
+              value={metrics && metrics.avg_rtf > 0 ? metrics.avg_rtf.toFixed(3) : '-'}
               loading={metricsQuery.isLoading}
               description="实时因子 (越小越快)"
             />
@@ -274,9 +275,7 @@ export default function MonitorPage() {
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">平均处理速度</p>
               <p className="text-2xl font-bold">
-                {metrics
-                  ? `${(1 / metrics.avg_rtf).toFixed(1)}x`
-                  : '-'}
+                {metrics && metrics.avg_rtf > 0 ? `${(1 / metrics.avg_rtf).toFixed(1)}x` : '-'}
               </p>
               <p className="text-xs text-muted-foreground">相对实时速度</p>
             </div>
