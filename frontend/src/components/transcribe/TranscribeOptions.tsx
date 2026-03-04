@@ -6,9 +6,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import { useBackendStore, useTranscriptionStore } from '@/stores'
-import { getBackendInfo } from '@/lib/api'
+import { getBackendInfo, probeBackendInfo } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useMemo, useState } from 'react'
 import { Sparkles, Users, BookText, Bot, Server, Braces, ChevronDown } from 'lucide-react'
@@ -57,6 +57,7 @@ export function TranscribeOptions() {
   } = useTranscriptionStore()
   const { baseUrl, setBaseUrl } = useBackendStore()
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [backendSelectOpen, setBackendSelectOpen] = useState(false)
 
   const backendOptions = useMemo(() => {
     if (!baseUrl || PRESET_BACKENDS.some((b) => b.value === baseUrl)) {
@@ -76,6 +77,37 @@ export function TranscribeOptions() {
     retry: false,
     staleTime: 30000,
   })
+
+  const backendProbeQueries = useQueries({
+    queries: backendOptions.map((b) => ({
+      queryKey: ['backendProbe', b.baseUrl || '__relative__'],
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        probeBackendInfo(b.baseUrl, { timeoutMs: 1500, signal }),
+      enabled: backendSelectOpen,
+      retry: false,
+      staleTime: 0,
+    })),
+  })
+
+  const getProbeStatus = (idx: number): 'ok' | 'loading' | 'error' | 'idle' => {
+    const q = backendProbeQueries[idx]
+    if (!backendSelectOpen) return 'idle'
+    if (q.isPending) return 'loading'
+    if (q.isError) return 'error'
+    if (q.isSuccess) return 'ok'
+    return 'idle'
+  }
+
+  const getProbeLabel = (idx: number): string => {
+    const q = backendProbeQueries[idx]
+    if (q.isSuccess) {
+      const name = String((q.data?.info as Record<string, unknown> | undefined)?.name || q.data?.backend || '')
+      return name ? `可用 · ${name}` : '可用'
+    }
+    if (q.isPending) return '探测中'
+    if (q.isError) return '不可用'
+    return ''
+  }
 
   const supportsSpeaker = backendInfoQuery.data?.capabilities.supports_speaker
   const supportsSpeakerFallback = backendInfoQuery.data?.capabilities.supports_speaker_fallback
@@ -172,6 +204,7 @@ export function TranscribeOptions() {
             <Label htmlFor="backend">快速选择</Label>
             <Select
               value={selectedBackendValue}
+              onOpenChange={setBackendSelectOpen}
               onValueChange={(value) => {
                 const hit = backendOptions.find((b) => b.value === value)
                 const nextBaseUrl = hit ? hit.baseUrl : value
@@ -182,9 +215,25 @@ export function TranscribeOptions() {
                 <SelectValue placeholder="选择后端..." />
               </SelectTrigger>
               <SelectContent>
-                {backendOptions.map((b) => (
+                {backendOptions.map((b, idx) => (
                   <SelectItem key={b.value} value={b.value}>
-                    {b.label}
+                    <span className="flex w-full items-center justify-between gap-2">
+                      <span className="truncate">{b.label}</span>
+                      {backendSelectOpen ? (
+                        <span
+                          className={cn(
+                            'text-xs',
+                            getProbeStatus(idx) === 'ok'
+                              ? 'text-green-700 dark:text-green-400'
+                              : getProbeStatus(idx) === 'error'
+                                ? 'text-red-700 dark:text-red-400'
+                                : 'text-muted-foreground'
+                          )}
+                        >
+                          {getProbeLabel(idx)}
+                        </span>
+                      ) : null}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

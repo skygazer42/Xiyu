@@ -177,6 +177,23 @@ export interface HotwordsUpdateResponse {
   message: string
 }
 
+// 热词文件（rules / rectify）
+export interface TextFileResponse {
+  code: number
+  text: string
+  count: number
+  message: string
+}
+
+export interface TextFileUpdateRequest {
+  text: string
+}
+
+export interface RectifyAppendRequest {
+  wrong: string
+  right: string
+}
+
 // 配置相关
 export interface ConfigResponse {
   config: Record<string, unknown>

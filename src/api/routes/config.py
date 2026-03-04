@@ -48,11 +48,17 @@ MUTABLE_CONFIG_KEYS = {
     "itn_enable",
     "itn_erhua_remove",
     "spacing_cjk_ascii_enable",
+    "spoken_punc_enable",
+    "acronym_merge_enable",
     "zh_convert_enable",
     "zh_convert_locale",
     "punc_convert_enable",
+    "punc_add_space",
     "punc_restore_enable",
+    "punc_restore_model",
     "punc_merge_enable",
+    "trash_punc_enable",
+    "trash_punc_chars",
     # 音频预处理
     "audio_normalize_enable",
     "audio_denoise_enable",
@@ -138,17 +144,68 @@ async def update_config(request: ConfigUpdateRequest):
     if rejected:
         logger.warning(f"Rejected config updates: {rejected}")
 
-    # 如果更新了纠错相关配置，需要重新初始化引擎
-    correction_keys = {"text_correct_enable", "text_correct_backend", "correction_pipeline"}
-    if correction_keys & set(updated):
-        try:
-            from src.core.engine import transcription_engine
-            # 重新创建后处理器
-            from src.core.text_processor import TextPostProcessor
-            transcription_engine.post_processor = TextPostProcessor.from_config(settings)
-            logger.info("Transcription engine post-processor reloaded")
-        except Exception as e:
-            logger.error(f"Failed to reload engine: {e}")
+    updated_set = set(updated)
+
+    # Apply runtime side-effects to the in-process engine, so that updating
+    # config from the frontend takes effect immediately.
+    try:
+        from src.core.engine import transcription_engine
+    except Exception as e:
+        logger.error(f"Failed to import transcription_engine for runtime update: {e}")
+        transcription_engine = None  # type: ignore[assignment]
+
+    if transcription_engine is not None:
+        # Text corrector toggles/backends (lazy init)
+        if {"text_correct_enable", "text_correct_backend"} & updated_set:
+            try:
+                transcription_engine._text_correct_enabled = bool(settings.text_correct_enable)
+                transcription_engine._text_corrector = None
+                logger.info("Transcription engine text corrector settings applied")
+            except Exception as e:
+                logger.error(f"Failed to apply text corrector settings: {e}")
+
+        # Hotword threshold should apply to corrector immediately.
+        if {"hotwords_threshold"} & updated_set:
+            try:
+                th = float(settings.hotwords_threshold)
+                transcription_engine.corrector.threshold = th
+                transcription_engine.corrector.similar_threshold = th - 0.2
+                transcription_engine.corrector.fast_rag.threshold = min(
+                    transcription_engine.corrector.threshold,
+                    transcription_engine.corrector.similar_threshold,
+                ) - 0.1
+                logger.info("Transcription engine hotword threshold applied")
+            except Exception as e:
+                logger.error(f"Failed to apply hotword threshold: {e}")
+
+        # Post-processor settings: rebuild the processor instance.
+        postprocess_keys = {
+            "filler_remove_enable",
+            "filler_aggressive",
+            "qj2bj_enable",
+            "itn_enable",
+            "itn_erhua_remove",
+            "spacing_cjk_ascii_enable",
+            "spoken_punc_enable",
+            "acronym_merge_enable",
+            "zh_convert_enable",
+            "zh_convert_locale",
+            "punc_convert_enable",
+            "punc_add_space",
+            "punc_restore_enable",
+            "punc_restore_model",
+            "punc_merge_enable",
+            "trash_punc_enable",
+            "trash_punc_chars",
+        }
+        if postprocess_keys & updated_set:
+            try:
+                from src.core.text_processor import TextPostProcessor
+
+                transcription_engine.post_processor = TextPostProcessor.from_config(settings)
+                logger.info("Transcription engine post-processor reloaded")
+            except Exception as e:
+                logger.error(f"Failed to reload post-processor: {e}")
 
     return ConfigResponse(config=get_current_config())
 

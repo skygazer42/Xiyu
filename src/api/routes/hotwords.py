@@ -1,9 +1,20 @@
-"""热词管理 API"""
+"""Hotwords / rules / rectify management APIs.
+
+This module exposes HTTP endpoints for:
+- forced hotwords: strong replacement/correction
+- context hotwords: prompt injection only (no forced replacement)
+- hot-rules.txt: regex/equals rule replacement
+- hot-rectify.txt: correction history for LLM prompt retrieval (RAG)
+"""
+
 import logging
+from pathlib import Path
 from typing import List
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from src.config import settings
 from src.core.engine import transcription_engine
 
 logger = logging.getLogger(__name__)
@@ -25,6 +36,73 @@ class HotwordsUpdateResponse(BaseModel):
     code: int = 0
     count: int = Field(..., description="更新后的热词数量")
     message: str = "success"
+
+
+class TextFileResponse(BaseModel):
+    code: int = 0
+    text: str = Field("", description="文件内容（UTF-8）")
+    count: int = Field(0, description="解析后的条目数量")
+    message: str = "success"
+
+
+class TextFileUpdateRequest(BaseModel):
+    text: str = Field(..., description="文件内容（UTF-8）")
+
+
+class RectifyAppendRequest(BaseModel):
+    wrong: str = Field(..., description="错误文本")
+    right: str = Field(..., description="正确文本")
+
+
+def _ensure_hotwords_dir() -> Path:
+    d = Path(settings.hotwords_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _read_text_file(path: Path) -> str:
+    try:
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {path.name}: {e}")
+
+
+def _write_text_file(path: Path, text: str) -> None:
+    try:
+        _ensure_hotwords_dir()
+        path.write_text(text or "", encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {path.name}: {e}")
+
+
+def _count_rules(text: str) -> int:
+    cnt = 0
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(" = ", 1)
+        if len(parts) == 2 and parts[0].strip():
+            cnt += 1
+    return cnt
+
+
+def _count_rectify_records(text: str) -> int:
+    content = text or ""
+    if not content.strip():
+        return 0
+    cnt = 0
+    for block in content.split("---"):
+        lines = [
+            line.strip()
+            for line in block.strip().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        if len(lines) >= 2 and lines[0] and lines[1]:
+            cnt += 1
+    return cnt
 
 
 @router.get("", response_model=HotwordsListResponse)
@@ -150,3 +228,130 @@ async def reload_context_hotwords():
     except Exception as e:
         logger.error(f"Failed to reload context hotwords: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------
+# Rules (hot-rules.txt)
+# ------------------------------------------------------------
+
+
+@router.get("/rules", response_model=TextFileResponse)
+async def get_rules_text() -> TextFileResponse:
+    """获取 hot-rules.txt 内容（正则/等号规则）。"""
+    path = _ensure_hotwords_dir() / "hot-rules.txt"
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rules(text))
+
+
+@router.post("/rules", response_model=TextFileResponse)
+async def update_rules_text(request: TextFileUpdateRequest) -> TextFileResponse:
+    """更新 hot-rules.txt（覆盖写入）并立即 reload。"""
+    path = _ensure_hotwords_dir() / "hot-rules.txt"
+    _write_text_file(path, request.text)
+    try:
+        transcription_engine.load_rules(str(path))
+    except Exception as e:
+        logger.error(f"Failed to reload rules after update: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rules(text), message="规则更新成功")
+
+
+@router.post("/rules/append", response_model=TextFileResponse)
+async def append_rules_text(request: TextFileUpdateRequest) -> TextFileResponse:
+    """追加写入 hot-rules.txt 并立即 reload。"""
+    path = _ensure_hotwords_dir() / "hot-rules.txt"
+    existing = _read_text_file(path)
+    add = request.text or ""
+    if add.strip():
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        existing += add
+    _write_text_file(path, existing)
+    try:
+        transcription_engine.load_rules(str(path))
+    except Exception as e:
+        logger.error(f"Failed to reload rules after append: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rules(text), message="规则追加成功")
+
+
+@router.post("/rules/reload", response_model=TextFileResponse)
+async def reload_rules() -> TextFileResponse:
+    """从文件重载 hot-rules.txt。"""
+    path = _ensure_hotwords_dir() / "hot-rules.txt"
+    try:
+        transcription_engine.load_rules(str(path))
+    except Exception as e:
+        logger.error(f"Failed to reload rules: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rules(text), message="规则重新加载成功")
+
+
+# ------------------------------------------------------------
+# Rectify history (hot-rectify.txt)
+# ------------------------------------------------------------
+
+
+@router.get("/rectify", response_model=TextFileResponse)
+async def get_rectify_text() -> TextFileResponse:
+    """获取 hot-rectify.txt 内容（纠错历史）。"""
+    path = _ensure_hotwords_dir() / "hot-rectify.txt"
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rectify_records(text))
+
+
+@router.post("/rectify", response_model=TextFileResponse)
+async def update_rectify_text(request: TextFileUpdateRequest) -> TextFileResponse:
+    """更新 hot-rectify.txt（覆盖写入）并立即 reload。"""
+    path = _ensure_hotwords_dir() / "hot-rectify.txt"
+    _write_text_file(path, request.text)
+    try:
+        transcription_engine.load_rectify_history(str(path))
+    except Exception as e:
+        logger.error(f"Failed to reload rectify history after update: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rectify_records(text), message="纠错历史更新成功")
+
+
+@router.post("/rectify/append", response_model=TextFileResponse)
+async def append_rectify_record(request: RectifyAppendRequest) -> TextFileResponse:
+    """追加一条纠错记录到 hot-rectify.txt 并立即 reload。"""
+    wrong = str(request.wrong or "").strip()
+    right = str(request.right or "").strip()
+    if not wrong or not right:
+        raise HTTPException(status_code=400, detail="wrong/right must be non-empty")
+
+    path = _ensure_hotwords_dir() / "hot-rectify.txt"
+    existing = _read_text_file(path)
+
+    block = f"{wrong}\n{right}\n"
+    if existing.strip():
+        new_text = existing.rstrip() + "\n\n---\n" + block
+    else:
+        new_text = block
+
+    _write_text_file(path, new_text)
+    try:
+        transcription_engine.load_rectify_history(str(path))
+    except Exception as e:
+        logger.error(f"Failed to reload rectify history after append: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rectify_records(text), message="纠错记录追加成功")
+
+
+@router.post("/rectify/reload", response_model=TextFileResponse)
+async def reload_rectify_history() -> TextFileResponse:
+    """从文件重载 hot-rectify.txt。"""
+    path = _ensure_hotwords_dir() / "hot-rectify.txt"
+    try:
+        transcription_engine.load_rectify_history(str(path))
+    except Exception as e:
+        logger.error(f"Failed to reload rectify history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    text = _read_text_file(path)
+    return TextFileResponse(text=text, count=_count_rectify_records(text), message="纠错历史重新加载成功")

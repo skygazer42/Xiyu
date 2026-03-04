@@ -1,5 +1,5 @@
 import apiClient from './client'
-import type { HotwordsListResponse, HotwordsUpdateResponse } from './types'
+import type { HotwordsListResponse, HotwordsUpdateResponse, TextFileResponse } from './types'
 
 /**
  * 获取当前热词列表
@@ -74,5 +74,69 @@ export async function appendContextHotwords(hotwords: string[]): Promise<Hotword
  */
 export async function reloadContextHotwords(): Promise<HotwordsUpdateResponse> {
   const response = await apiClient.post<HotwordsUpdateResponse>('/api/v1/hotwords/context/reload')
+  return response.data
+}
+
+/**
+ * 获取 hot-rules.txt
+ */
+export async function getRulesText(): Promise<TextFileResponse> {
+  const response = await apiClient.get<TextFileResponse>('/api/v1/hotwords/rules')
+  return response.data
+}
+
+/**
+ * 更新 hot-rules.txt（覆盖）
+ */
+export async function updateRulesText(text: string): Promise<TextFileResponse> {
+  const response = await apiClient.post<TextFileResponse>('/api/v1/hotwords/rules', { text })
+  return response.data
+}
+
+/**
+ * 追加 hot-rules.txt
+ */
+export async function appendRulesText(text: string): Promise<TextFileResponse> {
+  const response = await apiClient.post<TextFileResponse>('/api/v1/hotwords/rules/append', { text })
+  return response.data
+}
+
+/**
+ * 从文件重载 hot-rules.txt
+ */
+export async function reloadRulesText(): Promise<TextFileResponse> {
+  const response = await apiClient.post<TextFileResponse>('/api/v1/hotwords/rules/reload')
+  return response.data
+}
+
+/**
+ * 获取 hot-rectify.txt
+ */
+export async function getRectifyText(): Promise<TextFileResponse> {
+  const response = await apiClient.get<TextFileResponse>('/api/v1/hotwords/rectify')
+  return response.data
+}
+
+/**
+ * 更新 hot-rectify.txt（覆盖）
+ */
+export async function updateRectifyText(text: string): Promise<TextFileResponse> {
+  const response = await apiClient.post<TextFileResponse>('/api/v1/hotwords/rectify', { text })
+  return response.data
+}
+
+/**
+ * 追加一条纠错记录到 hot-rectify.txt
+ */
+export async function appendRectifyRecord(wrong: string, right: string): Promise<TextFileResponse> {
+  const response = await apiClient.post<TextFileResponse>('/api/v1/hotwords/rectify/append', { wrong, right })
+  return response.data
+}
+
+/**
+ * 从文件重载 hot-rectify.txt
+ */
+export async function reloadRectifyText(): Promise<TextFileResponse> {
+  const response = await apiClient.post<TextFileResponse>('/api/v1/hotwords/rectify/reload')
   return response.data
 }
