@@ -63,6 +63,7 @@
 - 对外开放端口数：**1**
 - 对外开放端口：`8200`（`tingwu-router`，同时提供 **Web UI + API**）
 - 内网访问：`http://<server-ip>:8200`
+- 监控页面：`http://<server-ip>:8200/monitor`（真实指标来自 `/metrics` 与 `/metrics/prometheus`）
 
 启动（会自动拉起它依赖的远程 ASR 服务：`qwen3-asr`、`vibevoice-asr`）：
 
