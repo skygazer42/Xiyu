@@ -7,7 +7,6 @@ import {
   Eye,
   Clock,
   FileAudio,
-  Download,
   ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -21,6 +20,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { ExportMenu } from "@/components/transcript"
 import { useHistoryStore, type HistoryItem } from "@/stores/historyStore"
 
 export interface HistoryListProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -87,17 +87,6 @@ function HistoryList({
     })
   }
 
-  const handleExport = (item: HistoryItem) => {
-    const content = item.transcript || item.textAccu || item.text
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${item.filename.replace(/\.[^/.]+$/, "")}-转写.txt`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   return (
     <Card className={className} {...props}>
       <CardHeader className="pb-3">
@@ -152,6 +141,26 @@ function HistoryList({
                 open={expandedId === item.id}
                 onOpenChange={(open) => setExpandedId(open ? item.id : null)}
               >
+                {(() => {
+                  const hasSpeaker =
+                    (item.speakerTurns?.length ?? 0) > 0 ||
+                    (item.sentences || []).some((s) => s.speaker_id !== undefined || !!s.speaker)
+                  const baseName = item.filename.replace(/\.[^/.]+$/, "")
+                  const exportResult = {
+                    code: 0,
+                    text: item.text,
+                    text_accu: item.textAccu ?? null,
+                    sentences: item.sentences,
+                    speaker_turns: item.speakerTurns ?? null,
+                    transcript: item.transcript,
+                    srt: item.srt ?? null,
+                    raw_text: item.rawText,
+                  }
+                  const preview = String(item.transcript || item.textAccu || item.text || "")
+                    .replace(/\s+/g, " ")
+                    .trim()
+
+                  return (
                 <div className="rounded-lg border bg-card overflow-hidden">
                   <div className="flex items-start gap-3 p-3">
                     <FileAudio className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
@@ -170,10 +179,15 @@ function HistoryList({
                             LLM
                           </Badge>
                         )}
+                        {hasSpeaker && (
+                          <Badge variant="outline" className="text-xs h-4">
+                            说话人
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {item.text.slice(0, 100)}
-                        {item.text.length > 100 ? "..." : ""}
+                        {preview.slice(0, 120)}
+                        {preview.length > 120 ? "..." : ""}
                       </p>
                     </div>
 
@@ -207,14 +221,7 @@ function HistoryList({
                             查看
                           </Button>
                         )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleExport(item)}
-                        >
-                          <Download className="h-4 w-4 mr-1" />
-                          导出
-                        </Button>
+                        <ExportMenu result={exportResult} filename={`${baseName}-转写`} />
                         <Button
                           variant="ghost"
                           size="sm"
@@ -228,6 +235,8 @@ function HistoryList({
                     </div>
                   </CollapsibleContent>
                 </div>
+                  )
+                })()}
               </Collapsible>
             ))}
           </div>

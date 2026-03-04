@@ -166,11 +166,11 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
   },
 
   addItem: (item) => {
-    const newItem: HistoryItem = {
+    const newItem: HistoryItem = upgradeHistoryItem({
       ...item,
       id: `history_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: Date.now(),
-    }
+    })
 
     const items = [newItem, ...get().items]
 
