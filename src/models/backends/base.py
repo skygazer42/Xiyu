@@ -57,6 +57,49 @@ class ASRBackend(ABC):
         """是否支持说话人识别"""
         return False
 
+    @property
+    def supports_batch(self) -> bool:
+        """是否支持 batch 推理（服务端一次调用处理多个音频）
+
+        注意：即使 supports_batch=False，仍然可以调用 transcribe_batch，
+        只是会退化为逐条 transcribe()。
+        """
+        return False
+
+    def transcribe_batch(
+        self,
+        audio_inputs: List[Any],
+        hotwords: Optional[str] = None,
+        with_speaker: bool = False,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """批量转写（best-effort）
+
+        默认实现：逐条调用 transcribe()。
+        对于支持 padded batching 的后端（例如 FunASR AutoModel.generate），
+        子类应覆盖此方法以获得更高吞吐与更稳定的并发行为。
+
+        Args:
+            audio_inputs: 多个音频输入（bytes/path/numpy 等）
+            hotwords: 热词字符串（统一应用到 batch 内所有样本）
+            with_speaker: 是否启用说话人识别（统一应用）
+            **kwargs: 其他参数（统一应用）
+
+        Returns:
+            每条音频对应一个转写结果 dict
+        """
+        results: List[Dict[str, Any]] = []
+        for audio_input in audio_inputs:
+            results.append(
+                self.transcribe(
+                    audio_input,
+                    hotwords=hotwords,
+                    with_speaker=with_speaker,
+                    **kwargs,
+                )
+            )
+        return results
+
     def transcribe_streaming(
         self,
         audio_chunk: bytes,
@@ -95,4 +138,5 @@ class ASRBackend(ABC):
             "supports_streaming": self.supports_streaming,
             "supports_hotwords": self.supports_hotwords,
             "supports_speaker": self.supports_speaker,
+            "supports_batch": self.supports_batch,
         }

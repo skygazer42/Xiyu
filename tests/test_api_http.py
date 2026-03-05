@@ -136,7 +136,8 @@ def test_transcribe_include_srt(client):
 
 
 def test_transcribe_all_models_includes_srt(client):
-    with patch('src.api.routes.transcribe.transcribe_all_models', new_callable=AsyncMock) as mock_all:
+    with patch('src.api.routes.transcribe.transcribe_all_models', new_callable=AsyncMock) as mock_all, \
+         patch('src.api.routes.transcribe.process_audio_file') as mock_process:
         mock_all.return_value = {
             "code": 0,
             "base_backend": "pytorch",
@@ -151,8 +152,13 @@ def test_transcribe_all_models_includes_srt(client):
                 "speaker_turns": None,
                 "transcript": "[00:00 - 00:00] 说话人甲: 你好",
                 "raw_text": None,
-            },
-        }
+                },
+            }
+
+        async def fake_process(file, preprocess_options=None):
+            # 1s PCM16LE @ 16kHz mono (2 bytes/sample)
+            yield b"\x00" * (16000 * 2)
+        mock_process.side_effect = fake_process
 
         files = {"file": ("test.wav", io.BytesIO(b"fake"), "audio/wav")}
         response = client.post("/api/v1/transcribe/all", files=files)

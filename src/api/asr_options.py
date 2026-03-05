@@ -50,6 +50,7 @@ _CHUNKING_KEYS = {
     "boundary_reconcile_enable",
     "boundary_reconcile_window_s",
     "max_workers",
+    "infer_batch_size",
     "overlap_chars",
 }
 
@@ -113,6 +114,7 @@ _CHUNKING_TYPES: Dict[str, str] = {
     "boundary_reconcile_enable": "bool",
     "boundary_reconcile_window_s": "number",
     "max_workers": "int",
+    "infer_batch_size": "int",
     "overlap_chars": "int",
 }
 

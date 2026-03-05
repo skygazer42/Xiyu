@@ -16,6 +16,7 @@ from src.core.engine import transcription_engine
 from src.core.ensemble_v2 import transcribe_all_models
 from src.utils.service_metrics import metrics
 from src.utils.subtitles import generate_srt_from_result
+from src.models.backends.remote_utils import pcm16le_to_wav_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -294,21 +295,51 @@ async def transcribe_all_models_api(
 
     t0 = time.time()
     try:
-        # Read once; reuse for multi-backend HTTP fan-out.
-        file_bytes = await file.read()
-        if not file_bytes:
-            raise HTTPException(status_code=400, detail="音频文件为空")
+        # Convert once (ffmpeg -> 16k mono PCM) and apply preprocessing once
+        # (including ClearVoice denoise if requested), then fan-out the *same*
+        # WAV bytes to all backend containers. This avoids repeating heavy
+        # preprocessing for each backend.
+        preprocess_options = (parsed_asr_options or {}).get("preprocess")
+        pcm16le_bytes: Optional[bytes] = None
+        async for audio_bytes in process_audio_file(file, preprocess_options=preprocess_options):
+            pcm16le_bytes = audio_bytes
+            break
+        if not pcm16le_bytes:
+            raise HTTPException(status_code=400, detail="音频文件为空或无法解码")
+
+        file_bytes = pcm16le_to_wav_bytes(pcm16le_bytes)
+
+        # IMPORTANT: we've already applied preprocessing in this orchestrator.
+        # Force downstream model containers to skip request-scoped + global
+        # preprocessing to avoid double-normalize/double-denoise.
+        forward_asr_options: dict = dict(parsed_asr_options or {})
+        forward_asr_options["preprocess"] = {
+            "normalize_enable": False,
+            "trim_silence_enable": False,
+            "denoise_enable": False,
+            "vocal_separate_enable": False,
+            "adaptive_enable": False,
+            "remove_dc_offset": False,
+            "highpass_enable": False,
+            "soft_limit_enable": False,
+        }
+
+        # Ensure filename/content-type match the bytes we fan-out.
+        try:
+            wav_name = f"{Path(file.filename).stem or 'audio'}.wav"
+        except Exception:
+            wav_name = "audio.wav"
 
         out = await transcribe_all_models(
             file_bytes=file_bytes,
-            filename=file.filename,
-            content_type=file.content_type,
+            filename=wav_name,
+            content_type="audio/wav",
             with_speaker=with_speaker,
             apply_hotword=apply_hotword,
             apply_llm=apply_llm,
             llm_role=llm_role,
             hotwords=hotwords,
-            asr_options=parsed_asr_options,
+            asr_options=forward_asr_options,
         )
 
         if include_srt:

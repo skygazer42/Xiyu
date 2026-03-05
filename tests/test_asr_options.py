@@ -36,6 +36,12 @@ def test_asr_options_chunking_boundary_reconcile_keys_allowed():
     assert opts["chunking"]["boundary_reconcile_window_s"] == 0.5
 
 
+def test_asr_options_chunking_infer_batch_size_key_allowed():
+    opts = parse_asr_options('{"chunking":{"infer_batch_size":4}}')
+    assert opts is not None
+    assert opts["chunking"]["infer_batch_size"] == 4
+
+
 def test_asr_options_chunking_boundary_reconcile_window_must_be_non_negative():
     with pytest.raises(ValueError, match="boundary_reconcile_window_s"):
         parse_asr_options('{"chunking":{"boundary_reconcile_enable":true,"boundary_reconcile_window_s":-0.1}}')

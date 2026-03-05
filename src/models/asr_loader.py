@@ -1,7 +1,7 @@
 """FunASR 模型加载器 - 向后兼容封装
 """
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from src.models.backends.pytorch import PyTorchBackend
 
@@ -65,4 +65,19 @@ class ASRModelLoader:
             hotwords=hotwords,
             with_speaker=with_speaker,
             **kwargs
+        )
+
+    def transcribe_batch(
+        self,
+        audio_inputs: List[Any],
+        hotwords: Optional[str] = None,
+        with_speaker: bool = False,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """批量转写（向后兼容封装）。"""
+        return self._backend.transcribe_batch(
+            audio_inputs,
+            hotwords=hotwords,
+            with_speaker=with_speaker,
+            **kwargs,
         )

@@ -456,6 +456,55 @@ class TranscriptionEngine:
             **call_kwargs,
         )
 
+    def _backend_transcribe_batch(
+        self,
+        backend,
+        *,
+        audio_inputs: List[Any],
+        hotwords: Optional[str],
+        with_speaker: bool,
+        target_backend: Optional[str],
+        backend_kwargs: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Call backend.transcribe_batch with router target override (best-effort).
+
+        Notes:
+        - Unit tests often patch `model_manager.backend` with a MagicMock; in that
+          case we intentionally fall back to per-item `transcribe()` calls so the
+          mock expectations remain stable.
+        - Real backends inherit from ASRBackend and provide a default
+          `transcribe_batch` implementation (per-item) even if they don't support
+          optimized batching.
+        """
+        call_kwargs: Dict[str, Any] = dict(backend_kwargs or {})
+        if target_backend and self._is_router_backend(backend):
+            call_kwargs["target_backend"] = target_backend
+
+        try:
+            from src.models.backends.base import ASRBackend as _ASRBackend
+        except Exception:
+            _ASRBackend = None  # type: ignore[assignment]
+
+        if _ASRBackend is None or not isinstance(backend, _ASRBackend):
+            return [
+                self._backend_transcribe(
+                    backend,
+                    audio_input=x,
+                    hotwords=hotwords,
+                    with_speaker=with_speaker,
+                    target_backend=target_backend,
+                    backend_kwargs=backend_kwargs,
+                )
+                for x in audio_inputs
+            ]
+
+        return backend.transcribe_batch(
+            list(audio_inputs),
+            hotwords=hotwords,
+            with_speaker=with_speaker,
+            **call_kwargs,
+        )
+
     def _get_request_speaker_options(self, asr_options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Return request-scoped speaker formatting options.
 
@@ -2225,7 +2274,7 @@ class TranscriptionEngine:
         llm_role: str = "default",
         hotwords: Optional[str] = None,
         asr_options: Optional[Dict[str, Any]] = None,
-        max_workers: int = 2,
+        max_workers: int = 1,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         sample_rate: int = 16000,
         **kwargs
@@ -2275,13 +2324,28 @@ class TranscriptionEngine:
         if isinstance(chunking_options, dict):
             if isinstance(chunking_options.get("max_workers"), int):
                 max_workers = int(chunking_options["max_workers"])
+            try:
+                infer_batch_size = int(
+                    chunking_options.get("infer_batch_size", getattr(settings, "chunk_infer_batch_size", 1)) or 0
+                )
+            except Exception:
+                infer_batch_size = int(getattr(settings, "chunk_infer_batch_size", 1) or 1)
             overlap_chars = int(chunking_options.get("overlap_chars", 20) or 0)
             boundary_reconcile_enable = bool(chunking_options.get("boundary_reconcile_enable", False))
             boundary_reconcile_window_s = float(chunking_options.get("boundary_reconcile_window_s", 1.0) or 0.0)
         else:
+            try:
+                infer_batch_size = int(getattr(settings, "chunk_infer_batch_size", 1) or 1)
+            except Exception:
+                infer_batch_size = 1
             overlap_chars = 20
             boundary_reconcile_enable = False
             boundary_reconcile_window_s = 0.0
+        if infer_batch_size <= 0:
+            infer_batch_size = 1
+        # Avoid accidental huge batches.
+        if infer_batch_size > 64:
+            infer_batch_size = 64
 
         if isinstance(audio_input, np.ndarray):
             audio = audio_input.astype(np.float32, copy=False)
@@ -2418,22 +2482,135 @@ class TranscriptionEngine:
                 "sentences": raw_result.get("sentence_info", []),
             }
 
-        # 并行处理分块
-        def _on_chunk_progress(done: int, total: int, _res: Dict[str, Any]) -> None:
+        total_chunks = len(chunks)
+        chunk_results: List[Dict[str, Any]] = []
+
+        def _report_progress(done: int, total: int) -> None:
             if progress_callback is None:
                 return
             try:
                 progress_callback(int(done), int(total))
             except Exception:
-                # Progress reporting should never break transcription.
                 return
 
-        chunk_results = chunker.process_parallel(
-            chunks,
-            transcribe_chunk,
-            max_workers=max_workers,
-            on_progress=_on_chunk_progress if progress_callback is not None else None,
-        )
+        # 并发策略：
+        # - max_workers>1：保持旧行为（线程池并行），适合 CPU/不可 batch 的后端
+        # - 否则：优先 batch 推理（infer_batch_size>1），否则串行逐块推理
+        done = 0
+        if max_workers > 1 and infer_batch_size <= 1:
+            def _on_chunk_progress(_done: int, _total: int, _res: Dict[str, Any]) -> None:
+                _report_progress(_done, _total)
+
+            chunk_results = chunker.process_parallel(
+                chunks,
+                transcribe_chunk,
+                max_workers=max_workers,
+                on_progress=_on_chunk_progress if progress_callback is not None else None,
+            )
+            done = total_chunks
+        elif infer_batch_size <= 1:
+            # 串行逐块推理（最稳定，避免多线程并发占用显存）
+            for chunk_audio, start_sample, end_sample in chunks:
+                try:
+                    r = transcribe_chunk(chunk_audio)
+                    chunk_results.append(
+                        {
+                            "start_sample": int(start_sample),
+                            "end_sample": int(end_sample),
+                            "success": True,
+                            "result": r,
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Chunk processing failed: {e}")
+                    chunk_results.append(
+                        {
+                            "start_sample": int(start_sample),
+                            "end_sample": int(end_sample),
+                            "success": False,
+                            "error": str(e),
+                        }
+                    )
+                done += 1
+                _report_progress(done, total_chunks)
+        else:
+            # Batch 推理：将多个 chunk 打包成 list，一次调用 backend.transcribe_batch()
+            for i in range(0, total_chunks, infer_batch_size):
+                batch = chunks[i : i + infer_batch_size]
+                batch_bytes: List[bytes] = []
+                batch_meta: List[tuple[int, int]] = []
+                for chunk_audio, start_sample, end_sample in batch:
+                    batch_bytes.append(float32_to_pcm16le_bytes(chunk_audio))
+                    batch_meta.append((int(start_sample), int(end_sample)))
+
+                try:
+                    if with_speaker and not backend.supports_speaker:
+                        raw_batch = model_manager.loader.transcribe_batch(
+                            batch_bytes,
+                            hotwords=injection_hotwords,
+                            with_speaker=with_speaker,
+                            **effective_backend_kwargs,
+                        )
+                    else:
+                        raw_batch = self._backend_transcribe_batch(
+                            backend,
+                            audio_inputs=batch_bytes,
+                            hotwords=injection_hotwords,
+                            with_speaker=with_speaker,
+                            target_backend=target_backend,
+                            backend_kwargs=effective_backend_kwargs,
+                        )
+
+                    if not isinstance(raw_batch, list):
+                        raise ValueError("backend.transcribe_batch must return a list")
+
+                    # Normalize length (never crash merge on partial batch outputs).
+                    if len(raw_batch) < len(batch_meta):
+                        raw_batch = list(raw_batch) + [{}] * (len(batch_meta) - len(raw_batch))
+
+                    for j, (start_sample, end_sample) in enumerate(batch_meta):
+                        item = raw_batch[j] if j < len(raw_batch) else {}
+                        if not isinstance(item, dict):
+                            item = {}
+                        chunk_results.append(
+                            {
+                                "start_sample": start_sample,
+                                "end_sample": end_sample,
+                                "success": True,
+                                "result": {
+                                    "text": item.get("text", ""),
+                                    "sentences": item.get("sentence_info", []),
+                                },
+                            }
+                        )
+                        done += 1
+                        _report_progress(done, total_chunks)
+
+                except Exception as e:
+                    logger.warning(f"Batch chunk transcription failed, falling back to per-chunk: {e}")
+                    for (chunk_audio, start_sample, end_sample) in batch:
+                        try:
+                            r = transcribe_chunk(chunk_audio)
+                            chunk_results.append(
+                                {
+                                    "start_sample": int(start_sample),
+                                    "end_sample": int(end_sample),
+                                    "success": True,
+                                    "result": r,
+                                }
+                            )
+                        except Exception as e2:
+                            logger.error(f"Chunk processing failed: {e2}")
+                            chunk_results.append(
+                                {
+                                    "start_sample": int(start_sample),
+                                    "end_sample": int(end_sample),
+                                    "success": False,
+                                    "error": str(e2),
+                                }
+                            )
+                        done += 1
+                        _report_progress(done, total_chunks)
 
         # Optional boundary reconciliation (accuracy-first, slower):
         # Re-transcribe a small window around each chunk split and inject it as a

@@ -16,6 +16,17 @@ frontend/dist/
 data/models/
 data/uploads/
 data/outputs/
+data/_tmp/
+
+# Local media samples (keep in repo for smoke tests, but don't send to docker build context)
+*.m4a
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.mp4
+*.avi
+*.mkv
 
 # Optional: local clone of VibeVoice (mounted into vLLM container, not needed for builds)
 VibeVoice/

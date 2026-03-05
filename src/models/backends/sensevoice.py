@@ -93,6 +93,11 @@ class SenseVoiceBackend(ASRBackend):
         """SenseVoice 不支持说话人识别"""
         return False
 
+    @property
+    def supports_batch(self) -> bool:
+        # FunASR AutoModel.generate supports list inputs and performs padded batching internally.
+        return True
+
     def transcribe(
         self,
         audio_input,
@@ -166,6 +171,78 @@ class SenseVoiceBackend(ASRBackend):
         except Exception as e:
             logger.error(f"SenseVoice transcription failed: {e}")
             raise
+
+    def transcribe_batch(
+        self,
+        audio_inputs: List[Any],
+        hotwords: Optional[str] = None,
+        language: Optional[str] = None,
+        with_speaker: bool = False,
+        use_emotion: bool = False,
+        use_event: bool = False,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """批量转写（优先走 FunASR 内部 padded batching）。"""
+        self._ensure_loaded()
+        items = list(audio_inputs or [])
+        if not items:
+            return []
+
+        if with_speaker:
+            logger.warning("SenseVoice backend does not support speaker diarization (batch); ignoring with_speaker=True")
+
+        if hotwords:
+            logger.debug("SenseVoice backend (batch): hotwords will be processed via post-processing pipeline")
+
+        lang = language or self.language
+
+        try:
+            result = self._model.generate(  # type: ignore[union-attr]
+                input=items,
+                language=lang,
+                use_itn=True,
+                **kwargs,
+            )
+        except Exception as e:
+            logger.warning(f"SenseVoice batch generate failed, falling back to per-item: {e}")
+            return [
+                self.transcribe(
+                    x,
+                    hotwords=hotwords,
+                    language=language,
+                    with_speaker=False,
+                    use_emotion=use_emotion,
+                    use_event=use_event,
+                    **kwargs,
+                )
+                for x in items
+            ]
+
+        if not isinstance(result, list):
+            result = [result] if result is not None else []
+
+        out: List[Dict[str, Any]] = []
+        for i in range(len(items)):
+            item = result[i] if i < len(result) else None
+            if not isinstance(item, dict):
+                out.append({"text": "", "sentence_info": []})
+                continue
+
+            raw_text = str(item.get("text", "") or "")
+            text = self._clean_sensevoice_tags(raw_text)
+            emotion, event = self._parse_sensevoice_tags(raw_text)
+
+            resp: Dict[str, Any] = {
+                "text": text,
+                "sentence_info": [{"text": text, "start": 0, "end": 0}] if text else [],
+            }
+            if use_emotion and emotion:
+                resp["emotion"] = emotion
+            if use_event and event:
+                resp["event"] = event
+            out.append(resp)
+
+        return out
 
     def _clean_sensevoice_tags(self, text: str) -> str:
         """清理 SenseVoice 输出中的特殊标签

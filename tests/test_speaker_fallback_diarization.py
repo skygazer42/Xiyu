@@ -149,14 +149,18 @@ def test_transcribe_async_speaker_fallback_diarization_failure_falls_back_to_ign
                 apply_hotword=False,
                 apply_llm=False,
             )
-        )
+    )
 
     assert out["text"] == "普通文本"
-    assert out["sentences"] == []
+    # Even when speaker fallback fails, we should still return a normal transcript.
+    # Backend may not provide sentence timestamps; engine can synthesize a single
+    # sentence for UI timeline exports (best-effort).
+    assert isinstance(out.get("sentences"), list)
+    assert out["sentences"]
+    assert out["sentences"][0]["text"] == "普通文本"
     assert "speaker_turns" not in out
     assert "transcript" not in out
 
     assert mock_model_manager.backend.transcribe.call_count == 1
     kwargs = mock_model_manager.backend.transcribe.call_args.kwargs
     assert kwargs.get("with_speaker") is False
-

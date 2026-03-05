@@ -12,8 +12,8 @@ torch>=2.0.0
 torchaudio>=2.0.0
 modelscope>=1.10.0
 
-# Whisper (optional local backend)
-openai-whisper>=20231117
+# Whisper (optional local backend) - faster-whisper (CTranslate2)
+faster-whisper>=1.1.0
 
 # Audio processing
 librosa>=0.10.0

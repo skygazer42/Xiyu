@@ -1,6 +1,6 @@
 """PyTorch 后端 - 基于 FunASR AutoModel"""
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from funasr import AutoModel
 
@@ -113,6 +113,11 @@ class PyTorchBackend(ASRBackend):
     def supports_speaker(self) -> bool:
         return True
 
+    @property
+    def supports_batch(self) -> bool:
+        # FunASR AutoModel.generate supports list inputs and performs padded batching internally.
+        return True
+
     def transcribe(
         self,
         audio_input,
@@ -157,6 +162,83 @@ class PyTorchBackend(ASRBackend):
             # 保留原始数据供高级用途
             "_raw": raw,
         }
+
+    def transcribe_batch(
+        self,
+        audio_inputs: List[Any],
+        hotwords: Optional[str] = None,
+        with_speaker: bool = False,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """批量转写（优先走 FunASR 内部 padded batching）。"""
+        items = list(audio_inputs or [])
+        if not items:
+            return []
+
+        params = {
+            "input": items,
+            "sentence_timestamp": True,
+            "batch_size_s": 300,
+            "max_single_segment_time": settings.vad_max_segment_ms,
+        }
+        if hotwords:
+            params["hotword"] = hotwords
+        params.update(kwargs)
+
+        model = self.asr_model_with_spk if with_speaker else self.asr_model
+
+        def _unwrap_raw(x: Any) -> Optional[Dict[str, Any]]:
+            if x is None:
+                return None
+            if isinstance(x, dict):
+                return x
+            if isinstance(x, list) and x:
+                # Some FunASR variants may wrap per-item outputs in a list.
+                first = x[0]
+                if isinstance(first, dict):
+                    return first
+            return None
+
+        try:
+            result = model.generate(**params)
+        except Exception as e:
+            logger.warning(f"FunASR batch generate failed, falling back to per-item: {e}")
+            return [
+                self.transcribe(x, hotwords=hotwords, with_speaker=with_speaker, **kwargs)
+                for x in items
+            ]
+
+        if not isinstance(result, list):
+            result = [result] if result is not None else []
+
+        out: List[Dict[str, Any]] = []
+        for i in range(len(items)):
+            raw = _unwrap_raw(result[i] if i < len(result) else None) or {}
+            out.append(
+                {
+                    "text": raw.get("text", "") if isinstance(raw, dict) else "",
+                    "sentence_info": raw.get("sentence_info", []) if isinstance(raw, dict) else [],
+                    "_raw": raw,
+                }
+            )
+
+        return out
+
+    def get_info(self) -> Dict[str, Any]:
+        base = super().get_info()
+        base.update(
+            {
+                "type": "pytorch",
+                "device": self.device,
+                "ngpu": self.ngpu,
+                "ncpu": self.ncpu,
+                "asr_model": self._asr_model_name,
+                "vad_model": self._vad_model_name,
+                "punc_model": self._punc_model_name,
+                "spk_model": self._spk_model_name,
+            }
+        )
+        return base
 
     def transcribe_streaming(
         self,

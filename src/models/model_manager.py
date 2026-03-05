@@ -129,6 +129,15 @@ class ModelManager:
                     device=settings.device,
                     language=settings.whisper_language,
                     download_root=settings.whisper_download_root,
+                    compute_type=getattr(settings, "whisper_compute_type", ""),
+                    cpu_threads=getattr(settings, "whisper_cpu_threads", 0),
+                    num_workers=getattr(settings, "whisper_num_workers", 1),
+                    beam_size=getattr(settings, "whisper_beam_size", 5),
+                    best_of=getattr(settings, "whisper_best_of", 5),
+                    temperature=getattr(settings, "whisper_temperature", 0.0),
+                    vad_filter=getattr(settings, "whisper_vad_filter", True),
+                    vad_min_silence_duration_ms=getattr(settings, "whisper_vad_min_silence_duration_ms", 500),
+                    word_timestamps=getattr(settings, "whisper_word_timestamps", False),
                 )
             else:
                 raise ValueError(f"Unknown backend type: {backend_type}")
@@ -168,6 +177,15 @@ class ModelManager:
                 device=settings.device,
                 language=settings.whisper_language,
                 download_root=settings.whisper_download_root,
+                compute_type=getattr(settings, "whisper_compute_type", ""),
+                cpu_threads=getattr(settings, "whisper_cpu_threads", 0),
+                num_workers=getattr(settings, "whisper_num_workers", 1),
+                beam_size=getattr(settings, "whisper_beam_size", 5),
+                best_of=getattr(settings, "whisper_best_of", 5),
+                temperature=getattr(settings, "whisper_temperature", 0.0),
+                vad_filter=getattr(settings, "whisper_vad_filter", True),
+                vad_min_silence_duration_ms=getattr(settings, "whisper_vad_min_silence_duration_ms", 500),
+                word_timestamps=getattr(settings, "whisper_word_timestamps", False),
             )
 
         raise ValueError(f"Unknown router backend type: {backend_type}")

@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -97,9 +97,17 @@ async def health_check():
 
 
 @app.get("/", tags=["system"])
-async def root():
-    """Root: serve Web UI if built; otherwise return service info JSON."""
-    if FRONTEND_DIST.exists():
+async def root(request: Request):
+    """Root: JSON by default; serve Web UI only for HTML clients.
+
+    Rationale:
+    - API clients (including tests/health probes) expect JSON.
+    - Browsers typically send `Accept: text/html` and should get the SPA UI when built.
+    """
+    accept = str(request.headers.get("accept", "") or "").lower()
+    wants_html = "text/html" in accept
+
+    if wants_html and FRONTEND_DIST.exists():
         index_file = FRONTEND_DIST / "index.html"
         if index_file.exists() and index_file.is_file():
             return FileResponse(index_file)

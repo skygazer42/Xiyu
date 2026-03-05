@@ -258,9 +258,18 @@ services:
       # hallucinated into the transcript. Keep hotword correction enabled
       # (apply_hotword), but disable forward-injection for this backend.
       HOTWORD_INJECTION_ENABLE: "false"
-      WHISPER_MODEL: ${WHISPER_MODEL:-large}
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-zh}
       WHISPER_DOWNLOAD_ROOT: ${WHISPER_DOWNLOAD_ROOT:-/app/data/models/whisper}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-0}
+      WHISPER_NUM_WORKERS: ${WHISPER_NUM_WORKERS:-1}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      WHISPER_BEST_OF: ${WHISPER_BEST_OF:-5}
+      WHISPER_TEMPERATURE: ${WHISPER_TEMPERATURE:-0.0}
+      WHISPER_VAD_FILTER: ${WHISPER_VAD_FILTER:-true}
+      WHISPER_VAD_MIN_SILENCE_DURATION_MS: ${WHISPER_VAD_MIN_SILENCE_DURATION_MS:-500}
+      WHISPER_WORD_TIMESTAMPS: ${WHISPER_WORD_TIMESTAMPS:-false}
     deploy:
       resources:
         reservations:

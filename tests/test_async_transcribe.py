@@ -177,6 +177,8 @@ def test_handle_url_transcribe_returns_engine_schema():
 
     with (
         patch.object(async_mod, "httpx") as mock_httpx,
+        # URL handler uses the newer in-memory ffmpeg conversion helper.
+        patch.object(async_mod, "_convert_path_to_pcm16le_bytes", return_value=b"\x00" * (16000 * 2)),
         patch.object(async_mod, "convert_audio_to_pcm", side_effect=_fake_convert),
         patch.object(async_mod.transcription_engine, "transcribe_long_audio", return_value=fake_engine_result),
     ):

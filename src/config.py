@@ -1,12 +1,17 @@
 import os
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, Literal
 
+_RUNNING_TESTS = "pytest" in sys.modules
+
 class Settings(BaseSettings):
     """应用配置"""
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Unit tests should be hermetic and must not depend on a developer's local `.env`.
+        # In production Docker images this file usually isn't present anyway.
+        env_file=None if _RUNNING_TESTS else ".env",
         env_file_encoding="utf-8",
         # Repo root `.env` is shared with docker-compose and may contain many
         # non-runtime keys (PORT_* etc). Ignore unknown keys instead of failing
@@ -51,13 +56,24 @@ class Settings(BaseSettings):
     vad_max_segment_ms: int = 60000              # VAD 单段最大时长 (毫秒)
     vad_speech_noise_thres: float = 0.8          # 语音/噪声阈值
 
+    # ------------------------------------------------------------
+    # Long-audio chunking inference micro-batching (服务端批处理)
+    # ------------------------------------------------------------
+    # 当长音频被切成多个 chunk 后：
+    # - 旧实现：ThreadPoolExecutor 多线程并发逐块推理（容易抢显存/不稳定）
+    # - 新实现：默认串行 + 尽量走后端 transcribe_batch 做 padded batching
+    #
+    # 该值表示每次调用 backend.transcribe_batch() 打包的 chunk 数量。
+    # 对 FunASR(PyTorch/SenseVoice) 这类后端，内部还会做 padded batching。
+    chunk_infer_batch_size: int = 4
+
     # ONNX 后端配置
     onnx_quantize: bool = True  # 启用 INT8 量化
     onnx_intra_threads: int = 4  # ONNX 推理线程数
     onnx_inter_threads: int = 1  # ONNX 并行操作数
 
     # 模型预热配置
-    warmup_on_startup: bool = True  # 启动时预热模型
+    warmup_on_startup: bool = False if _RUNNING_TESTS else True  # 启动时预热模型
     warmup_audio_duration: float = 1.0  # 预热音频时长(秒)
 
     # SenseVoice 后端配置
@@ -158,19 +174,32 @@ class Settings(BaseSettings):
     router_short_backend: Literal["qwen3", "vibevoice", "whisper"] = "qwen3"
     router_long_backend: Literal["qwen3", "vibevoice", "whisper"] = "vibevoice"
 
-    # Local Whisper backend (openai-whisper)
-    whisper_model: str = "large"
+    # Local Whisper backend (faster-whisper / CTranslate2)
+    # Notes:
+    # - Prefer explicit variants: tiny/base/small/medium/large-v2/large-v3...
+    # - We keep backward compat for "large" (mapped to large-v3 in the backend).
+    whisper_model: str = "large-v3"
     whisper_language: Optional[str] = "zh"
     # Set to a persistent directory (e.g. /app/data/models/whisper) to cache weights.
     whisper_download_root: str = ""
+    # faster-whisper tuning
+    whisper_compute_type: str = ""  # auto: cuda->float16, cpu->int8
+    whisper_cpu_threads: int = 0
+    whisper_num_workers: int = 1
+    whisper_beam_size: int = 5
+    whisper_best_of: int = 5
+    whisper_temperature: float = 0.0
+    whisper_vad_filter: bool = True
+    whisper_vad_min_silence_duration_ms: int = 500
+    whisper_word_timestamps: bool = False
     # Router-only: prefer proxying to an existing Xiyu whisper service container
     # (avoid loading weights twice).
     whisper_service_base_url: str = ""
     whisper_service_timeout_s: float = 600.0
 
     # 设备配置
-    device: Literal["cuda", "cpu"] = "cuda"
-    ngpu: int = 1
+    device: Literal["cuda", "cpu"] = "cpu" if _RUNNING_TESTS else "cuda"
+    ngpu: int = 0 if _RUNNING_TESTS else 1
     ncpu: int = 4
 
     # 热词配置

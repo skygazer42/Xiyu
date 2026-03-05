@@ -379,13 +379,15 @@ def _postprocess_vibevoice_content(content: str, *, with_speaker: bool) -> Dict[
             if not text:
                 continue
             texts.append(text)
-            if with_speaker:
-                start_ms = _time_to_ms(seg.get("start_time"))
-                end_ms = _time_to_ms(seg.get("end_time"))
-                spk = seg.get("speaker_id")
-                sentence_info.append({"text": text, "start": start_ms, "end": end_ms, "spk": spk})
+            start_ms = _time_to_ms(seg.get("start_time"))
+            end_ms = _time_to_ms(seg.get("end_time"))
+            item: Dict[str, Any] = {"text": text, "start": start_ms, "end": end_ms}
+            spk = seg.get("speaker_id")
+            if spk is not None:
+                item["spk"] = spk
+            sentence_info.append(item)
 
-        return {"text": " ".join(texts).strip(), "sentence_info": sentence_info if with_speaker else []}
+        return {"text": " ".join(texts).strip(), "sentence_info": sentence_info}
 
     # No segments parsed; return best-effort plain text.
     if not with_speaker:

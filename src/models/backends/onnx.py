@@ -181,6 +181,12 @@ class ONNXBackend(ASRBackend):
             self.load()
 
     @property
+    def supports_batch(self) -> bool:
+        # Best-effort: funasr_onnx Paraformer supports list inputs for wav paths.
+        # We try list[np.ndarray] too, but will gracefully fall back per-item.
+        return True
+
+    @property
     def supports_streaming(self) -> bool:
         """ONNX 后端支持流式（需要加载流式模型）"""
         return self._model_online is not None
@@ -221,57 +227,7 @@ class ONNXBackend(ASRBackend):
         # scipy.interpolate/fitpack. In some minimal Docker images this import can
         # fail with a RecursionError. Xiyu already provides 16kHz mono PCM16LE
         # bytes, so we bypass path loading completely by passing a waveform array.
-        import numpy as np
-
-        from src.core.audio.pcm import (
-            is_wav_bytes,
-            wav_bytes_to_float32,
-        )
-
-        def _resample_linear(x: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-            """Best-effort linear resample without scipy/librosa dependencies."""
-            if orig_sr <= 0 or target_sr <= 0:
-                raise ValueError(f"invalid sample rates: orig_sr={orig_sr} target_sr={target_sr}")
-            if orig_sr == target_sr:
-                return x.astype(np.float32, copy=False)
-            if x.size == 0:
-                return x.astype(np.float32, copy=False)
-            # Use float64 for indices for stability, but output float32.
-            ratio = float(target_sr) / float(orig_sr)
-            n_out = max(1, int(round(x.size * ratio)))
-            src_idx = np.linspace(0.0, float(x.size - 1), num=n_out, dtype=np.float64)
-            x64 = x.astype(np.float64, copy=False)
-            out = np.interp(src_idx, np.arange(x.size, dtype=np.float64), x64)
-            return out.astype(np.float32, copy=False)
-
-        if isinstance(audio_input, (str, Path)):
-            # Path inputs are not used by the HTTP API, but keep a small,
-            # dependency-light fallback for local usage: only support WAV.
-            p = Path(audio_input)
-            data = p.read_bytes()
-            if not is_wav_bytes(data):
-                raise ValueError("ONNX backend only supports WAV path inputs (non-WAV requires ffmpeg preprocessing)")
-            audio_f32, sr = wav_bytes_to_float32(data)
-            if sr != 16000:
-                audio_f32 = _resample_linear(audio_f32, sr, 16000)
-            waveform = audio_f32
-        elif isinstance(audio_input, (bytes, bytearray)):
-            data = bytes(audio_input)
-            if is_wav_bytes(data):
-                audio_f32, sr = wav_bytes_to_float32(data)
-                if sr != 16000:
-                    audio_f32 = _resample_linear(audio_f32, sr, 16000)
-                waveform = audio_f32
-            else:
-                # Xiyu internal: raw PCM16LE 16kHz mono
-                pcm = data
-                if len(pcm) % 2 != 0:
-                    pcm = pcm[: len(pcm) - 1]
-                waveform = (np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0)
-        elif isinstance(audio_input, np.ndarray):
-            waveform = audio_input.astype(np.float32, copy=False)
-        else:
-            raise ValueError(f"Unsupported audio input type for ONNX backend: {type(audio_input)}")
+        waveform = self._to_waveform_f32(audio_input)
 
         try:
             # 直接对完整音频进行 ASR（传入 waveform 可避免 librosa/scipy 依赖链）
@@ -317,6 +273,137 @@ class ONNXBackend(ASRBackend):
         finally:
             # No temp files when using waveform inputs.
             pass
+
+    def transcribe_batch(
+        self,
+        audio_inputs: List[Any],
+        hotwords: Optional[str] = None,
+        with_speaker: bool = False,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """批量转写（best-effort）。
+
+        funasr_onnx Paraformer 官方文档明确支持 List[str]（wav paths）输入。
+        为了避免 librosa/scipy 依赖链，这里优先尝试 List[np.ndarray] waveforms；
+        若运行时不支持，则自动退化为逐条 transcribe()。
+        """
+        self._ensure_loaded()
+
+        items = list(audio_inputs or [])
+        if not items:
+            return []
+
+        if with_speaker:
+            logger.warning("ONNX backend does not support speaker diarization (batch); ignoring with_speaker=True")
+
+        if hotwords:
+            logger.debug("ONNX backend (batch): hotwords will be processed via post-processing pipeline")
+
+        import numpy as np
+
+        waveforms: List[np.ndarray] = [self._to_waveform_f32(x) for x in items]
+
+        try:
+            asr_results = self._model(waveforms)
+        except Exception as e:
+            logger.info(f"ONNX batch inference not supported in this runtime, falling back to per-item: {e}")
+            return [
+                self.transcribe(x, hotwords=hotwords, with_speaker=False, **kwargs)
+                for x in items
+            ]
+
+        if not isinstance(asr_results, list):
+            asr_results = [asr_results] if asr_results is not None else []
+
+        out: List[Dict[str, Any]] = []
+        for i in range(len(items)):
+            try:
+                raw = asr_results[i] if i < len(asr_results) else None
+                raw_text = self._extract_text(raw) if raw is not None else ""
+            except Exception:
+                raw_text = ""
+
+            if not raw_text:
+                out.append({"text": "", "sentence_info": []})
+                continue
+
+            # Add punctuation (best-effort).
+            text = raw_text
+            try:
+                punc_result = self._punc_model(raw_text)
+                if isinstance(punc_result, tuple) and len(punc_result) >= 1:
+                    text = punc_result[0]
+                elif isinstance(punc_result, list) and len(punc_result) > 0:
+                    text = punc_result[0] if isinstance(punc_result[0], str) else raw_text
+            except Exception:
+                text = raw_text
+
+            out.append(
+                {
+                    "text": text,
+                    "sentence_info": [{"text": text, "start": 0, "end": 0}] if text else [],
+                }
+            )
+
+        return out
+
+    @staticmethod
+    def _resample_linear(x, orig_sr: int, target_sr: int):
+        """Best-effort linear resample without scipy/librosa dependencies."""
+        import numpy as np
+
+        if orig_sr <= 0 or target_sr <= 0:
+            raise ValueError(f"invalid sample rates: orig_sr={orig_sr} target_sr={target_sr}")
+        if orig_sr == target_sr:
+            return x.astype(np.float32, copy=False)
+        if x.size == 0:
+            return x.astype(np.float32, copy=False)
+
+        ratio = float(target_sr) / float(orig_sr)
+        n_out = max(1, int(round(x.size * ratio)))
+        src_idx = np.linspace(0.0, float(x.size - 1), num=n_out, dtype=np.float64)
+        x64 = x.astype(np.float64, copy=False)
+        out = np.interp(src_idx, np.arange(x.size, dtype=np.float64), x64)
+        return out.astype(np.float32, copy=False)
+
+    def _to_waveform_f32(self, audio_input):
+        import numpy as np
+
+        from src.core.audio.pcm import (
+            is_wav_bytes,
+            wav_bytes_to_float32,
+        )
+
+        if isinstance(audio_input, (str, Path)):
+            # Path inputs are not used by the HTTP API, but keep a small,
+            # dependency-light fallback for local usage: only support WAV.
+            p = Path(audio_input)
+            data = p.read_bytes()
+            if not is_wav_bytes(data):
+                raise ValueError("ONNX backend only supports WAV path inputs (non-WAV requires ffmpeg preprocessing)")
+            audio_f32, sr = wav_bytes_to_float32(data)
+            if sr != 16000:
+                audio_f32 = self._resample_linear(audio_f32, sr, 16000)
+            return audio_f32
+
+        if isinstance(audio_input, (bytes, bytearray)):
+            data = bytes(audio_input)
+            if is_wav_bytes(data):
+                audio_f32, sr = wav_bytes_to_float32(data)
+                if sr != 16000:
+                    audio_f32 = self._resample_linear(audio_f32, sr, 16000)
+                return audio_f32
+
+            # Xiyu internal: raw PCM16LE 16kHz mono
+            pcm = data
+            if len(pcm) % 2 != 0:
+                pcm = pcm[: len(pcm) - 1]
+            return (np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0)
+
+        if isinstance(audio_input, np.ndarray):
+            return audio_input.astype(np.float32, copy=False)
+
+        raise ValueError(f"Unsupported audio input type for ONNX backend: {type(audio_input)}")
 
     def transcribe_streaming(
         self,
