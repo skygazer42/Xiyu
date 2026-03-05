@@ -395,7 +395,7 @@ export function TranscribeOptions() {
         </div>
         {preprocess.clearvoice_denoise_enable ? (
           <p className="text-xs text-muted-foreground ml-8">
-            需要服务端安装 ClearerVoice-Studio 依赖或挂载 `CLEARVOICE_STUDIO_DIR`；否则任务会失败。
+            需要启动 `xiyu-clearvoice`（推荐）或在当前后端容器内可 import ClearerVoice-Studio；否则任务会失败。
           </p>
         ) : null}
 

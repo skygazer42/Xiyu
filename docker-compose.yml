@@ -1,6 +1,54 @@
 version: '3.8'
 
 services:
+  xiyu-clearvoice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xiyu-speech-service:pytorch
+    profiles: ["clearvoice"]
+    container_name: xiyu-clearvoice
+    ports:
+      - "${PORT_CLEARVOICE:-8400}:8000"
+    volumes:
+      - ./data:/app/data
+      # Persist ClearVoice checkpoints (ClearerVoice-Studio defaults to ./checkpoints/...).
+      - ./data/models/clearvoice:/app/checkpoints
+      - model-cache:/root/.cache/modelscope
+      - huggingface-cache:/root/.cache/huggingface
+      - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
+    environment:
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - ALL_PROXY=${ALL_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,::1}
+      - DEVICE=${CLEARVOICE_DEVICE:-cpu}
+      - NGPU=${CLEARVOICE_NGPU:-0}
+      - NCPU=${CLEARVOICE_NCPU:-4}
+      - CLEARVOICE_ENABLE=${CLEARVOICE_ENABLE:-true}
+      - CLEARVOICE_STUDIO_DIR=${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
+      - CLEARVOICE_MODEL=${CLEARVOICE_MODEL:-FRCRN_SE_16K}
+      - CLEARVOICE_FORCE_CPU=${CLEARVOICE_FORCE_CPU:-true}
+      - CLEARVOICE_CHUNK_DURATION_S=${CLEARVOICE_CHUNK_DURATION_S:-30.0}
+      - CLEARVOICE_OVERLAP_DURATION_S=${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
+      - CLEARVOICE_SERVICE_MAX_DURATION_S=${CLEARVOICE_SERVICE_MAX_DURATION_S:-600.0}
+      - CLEARVOICE_WARMUP_ON_STARTUP=${CLEARVOICE_WARMUP_ON_STARTUP:-false}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: ["python", "-m", "uvicorn", "src.clearvoice_service:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
   xiyu-diarizer:
     build:
       context: .
@@ -62,6 +110,10 @@ services:
       - CLEARVOICE_FORCE_CPU=${CLEARVOICE_FORCE_CPU:-true}
       - CLEARVOICE_CHUNK_DURATION_S=${CLEARVOICE_CHUNK_DURATION_S:-30.0}
       - CLEARVOICE_OVERLAP_DURATION_S=${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
+      # ClearVoice microservice (recommended)
+      - CLEARVOICE_SERVICE_BASE_URL=${CLEARVOICE_SERVICE_BASE_URL:-http://xiyu-clearvoice:8000}
+      - CLEARVOICE_SERVICE_TIMEOUT_S=${CLEARVOICE_SERVICE_TIMEOUT_S:-600.0}
+      - CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S=${CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S:-2.0}
       - SPEAKER_UNSUPPORTED_BEHAVIOR=${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
       - SPEAKER_EXTERNAL_DIARIZER_ENABLE=${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-false}
       - SPEAKER_EXTERNAL_DIARIZER_BASE_URL=${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://xiyu-diarizer:8000}

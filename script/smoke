@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Unified smoke test entrypoint.
+#
+# - Auto-detect running Xiyu services by probing /health on common ports.
+# - Runs the comprehensive endpoint suite: scripts/smoke_all_endpoints.sh
+#
+# Usage:
+#   ./script/smoke
+#
+# Optional env:
+#   PORTS="8200 8101 ..."           Override detected ports
+#   DIARIZER_PORT=8300              Override diarizer detection (set empty to skip)
+#   REMOTE_ASR_PORTS="9001 9002"    Override remote ASR ports for /v1/models readiness checks
+#   SKIP_REMOTE_ASR_CHECKS=true     Skip remote readiness even if ports are set
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
+
+_is_healthy() {
+  local port="$1"
+  curl -fsS --connect-timeout 1 --max-time 2 "http://localhost:${port}/health" >/dev/null 2>&1
+}
+
+_detect_ports() {
+  local detected=()
+  local candidates=(8200 8101 8102 8103 8104 8105 8201 8202)
+  for p in "${candidates[@]}"; do
+    if _is_healthy "${p}"; then
+      detected+=("${p}")
+    fi
+  done
+  printf "%s " "${detected[@]}"
+}
+
+if [ -z "${PORTS:-}" ]; then
+  PORTS="$(_detect_ports | xargs)"
+fi
+
+if [ -z "${DIARIZER_PORT-}" ]; then
+  if _is_healthy 8300; then
+    DIARIZER_PORT="8300"
+  else
+    DIARIZER_PORT=""
+  fi
+fi
+
+if [ -z "${REMOTE_ASR_PORTS:-}" ]; then
+  # Default vLLM ports used by docker-compose.remote-asr.yml / models.yml profiles.
+  #
+  # IMPORTANT: treat them as optional — only include ports that are actually
+  # listening, otherwise `smoke_all_endpoints.sh` will wait a long time.
+  remote_candidates=(9001 9002)
+  remote_detected=()
+  for rp in "${remote_candidates[@]}"; do
+    if curl -s --connect-timeout 1 --max-time 2 "http://localhost:${rp}/v1/models" >/dev/null 2>&1; then
+      remote_detected+=("${rp}")
+    fi
+  done
+  if [ "${#remote_detected[@]}" -gt 0 ]; then
+    REMOTE_ASR_PORTS="$(printf "%s " "${remote_detected[@]}" | xargs)"
+  else
+    REMOTE_ASR_PORTS=""
+  fi
+fi
+
+if [ -z "${REMOTE_ASR_PORTS:-}" ] && [ -z "${SKIP_REMOTE_ASR_CHECKS:-}" ]; then
+  SKIP_REMOTE_ASR_CHECKS="true"
+fi
+
+if [ -z "${PORTS}" ]; then
+  echo "ERROR: no running Xiyu ports detected. Start docker compose first, or set PORTS=..." >&2
+  exit 2
+fi
+
+export PORTS
+export DIARIZER_PORT
+export REMOTE_ASR_PORTS
+export SKIP_REMOTE_ASR_CHECKS
+
+exec bash scripts/smoke_all_endpoints.sh

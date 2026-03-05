@@ -50,6 +50,73 @@ class ClearVoiceDenoiser:
         self._cfg = cfg
         self._speech_model = None
 
+    @staticmethod
+    def _resolve_checkpoint_dir(model_name: str) -> Path:
+        """Resolve ClearVoice checkpoint directory for `model_name`.
+
+        ClearerVoice-Studio uses relative paths like `checkpoints/FRCRN_SE_16K` by
+        default. In our Docker deployment we mount a persistent directory at
+        `/app/checkpoints`, so prefer it when present.
+        """
+        name = str(model_name or "").strip() or "FRCRN_SE_16K"
+        docker_dir = Path("/app/checkpoints")
+        if docker_dir.exists() and docker_dir.is_dir():
+            return docker_dir / name
+        return Path("checkpoints") / name
+
+    def _ensure_checkpoints(self) -> None:
+        """Best-effort: ensure ClearVoice checkpoint files exist.
+
+        The upstream ClearerVoice-Studio helper may leave a partial checkout when
+        `git-lfs` is unavailable, which causes `last_best_checkpoint.pt` to be
+        missing even though `last_best_checkpoint` exists.
+        """
+        model_name = str(self._cfg.model or "").strip() or "FRCRN_SE_16K"
+        ckpt_dir = self._resolve_checkpoint_dir(model_name)
+        best_file = ckpt_dir / "last_best_checkpoint"
+
+        need_download = False
+        if not best_file.exists():
+            need_download = True
+        else:
+            try:
+                refs = [line.strip() for line in best_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            except Exception:
+                refs = []
+            if not refs:
+                need_download = True
+            else:
+                for ref in refs:
+                    p = ckpt_dir / ref
+                    if not p.exists():
+                        need_download = True
+                        break
+                    # Guard against LFS pointer files (a few hundred bytes) being mistaken for weights.
+                    try:
+                        if p.is_file() and p.stat().st_size < 1024:
+                            need_download = True
+                            break
+                    except Exception:
+                        pass
+
+        if not need_download:
+            return
+
+        repo_id = f"alibabasglab/{model_name}"
+        logger.info("ClearVoice checkpoint missing; downloading from HuggingFace: %s -> %s", repo_id, ckpt_dir)
+
+        try:
+            from huggingface_hub import snapshot_download
+        except Exception as e:
+            raise ClearVoiceNotAvailable(
+                "huggingface_hub is required to auto-download ClearVoice checkpoints. "
+                "Install it or manually place the weights under checkpoints/."
+            ) from e
+
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        # Use the hub cache by default; `local_dir` provides a stable layout for ClearVoice code.
+        snapshot_download(repo_id=repo_id, local_dir=str(ckpt_dir))
+
     def _import_clearvoice(self):
         try:
             from clearvoice import ClearVoice  # type: ignore
@@ -82,6 +149,9 @@ class ClearVoiceDenoiser:
             if not bool(getattr(settings, "clearvoice_enable", True)):
                 raise ClearVoiceDisabled("ClearVoice is disabled (set CLEARVOICE_ENABLE=true).")
 
+            # Ensure checkpoint files exist before ClearVoice tries to load them.
+            self._ensure_checkpoints()
+
             ClearVoice = self._import_clearvoice()
             cv = ClearVoice(task="speech_enhancement", model_names=[str(self._cfg.model)])
 
@@ -90,19 +160,35 @@ class ClearVoiceDenoiser:
             except Exception as e:
                 raise RuntimeError(f"ClearVoice model init failed: {e}") from e
 
-            # Best-effort: move to CPU to avoid stealing VRAM from ASR models.
-            if bool(self._cfg.force_cpu):
-                try:
-                    import torch
+            # Device placement:
+            # - When force_cpu=true: keep ClearVoice on CPU (safe default to avoid stealing VRAM).
+            # - Otherwise: follow `settings.device` if possible (cuda/cpu).
+            try:
+                import torch
 
+                want_cuda = (
+                    (not bool(self._cfg.force_cpu))
+                    and str(getattr(settings, "device", "cpu") or "cpu").strip().lower() == "cuda"
+                    and int(getattr(settings, "ngpu", 0) or 0) > 0
+                )
+
+                if want_cuda and torch.cuda.is_available():
+                    model.model.to(torch.device("cuda"))
+                    model.device = torch.device("cuda")
+                    try:
+                        model.args.use_cuda = 1
+                    except Exception:
+                        pass
+                else:
                     model.model.to(torch.device("cpu"))
                     model.device = torch.device("cpu")
                     try:
                         model.args.use_cuda = 0
                     except Exception:
                         pass
-                except Exception as e:
-                    logger.warning("ClearVoice force_cpu failed (ignored): %s", e)
+            except Exception as e:
+                # Do not fail service startup on best-effort device moves.
+                logger.warning("ClearVoice device placement failed (ignored): %s", e)
 
             self._speech_model = model
             logger.info(

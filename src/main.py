@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -168,6 +168,10 @@ if FRONTEND_DIST.exists():
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         """SPA 路由回退"""
+        # Never mask missing API routes with the SPA shell: this makes debugging
+        # deployment/version mismatches much harder (curl would get HTML).
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
         file_path = FRONTEND_DIST / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)

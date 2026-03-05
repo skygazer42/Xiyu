@@ -20,11 +20,10 @@ import ffmpeg
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.api.asr_options import parse_asr_options
-from src.api.dependencies import process_audio_file, _build_request_preprocessor
+from src.api.dependencies import process_audio_file
 from src.config import settings
 from src.core.engine import transcription_engine
 from src.core.task_manager import task_manager, TaskStatus
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -119,27 +118,6 @@ def _convert_path_to_pcm16le_bytes(input_path: str) -> bytes:
         raise
 
 
-def _preprocess_pcm16le_bytes(pcm16le: bytes, preprocess_options: Optional[dict]) -> bytes:
-    """Apply request-scoped audio preprocessing (normalize/denoise/etc) to PCM16LE bytes."""
-    preprocessor = _build_request_preprocessor(preprocess_options)
-
-    should_process = (
-        getattr(preprocessor, "remove_dc_offset", True)
-        or getattr(preprocessor, "highpass_enable", False)
-        or getattr(preprocessor, "soft_limit_enable", False)
-        or preprocessor.normalize_enable
-        or preprocessor.trim_silence_enable
-        or preprocessor.denoise_enable
-        or preprocessor.vocal_separate_enable
-    )
-    if not should_process or not pcm16le:
-        return pcm16le
-
-    audio_array = np.frombuffer(pcm16le, dtype=np.int16).astype(np.float32) / 32768.0
-    audio_array = preprocessor.process(audio_array, sample_rate=16000, validate=False)
-    return (audio_array * 32768.0).astype(np.int16).tobytes()
-
-
 def _handle_url_transcribe(payload: dict) -> dict:
     """
     处理 URL 转写任务
@@ -186,10 +164,10 @@ def _handle_url_transcribe(payload: dict) -> dict:
             task_manager.update_progress(task_id, progress=10, message="转换音频")
         audio_bytes = _convert_path_to_pcm16le_bytes(temp_download.name)
 
-        preprocess_options = (asr_options or {}).get("preprocess") if isinstance(asr_options, dict) else None
         if task_id:
-            task_manager.update_progress(task_id, progress=15, message="音频预处理")
-        audio_bytes = _preprocess_pcm16le_bytes(audio_bytes, preprocess_options)
+            # Long-audio preprocessing (including ClearVoice denoise) runs per-chunk in the engine
+            # to keep timestamps stable and avoid holding a full "denoised copy" in memory.
+            task_manager.update_progress(task_id, progress=15, message="准备分块")
 
         # 执行转写
         if task_id:
@@ -268,10 +246,8 @@ def _handle_file_transcribe(payload: dict) -> dict:
             task_manager.update_progress(task_id, progress=10, message="转换音频")
         audio_bytes = _convert_path_to_pcm16le_bytes(str(input_path))
 
-        preprocess_options = (asr_options or {}).get("preprocess") if isinstance(asr_options, dict) else None
         if task_id:
-            task_manager.update_progress(task_id, progress=15, message="音频预处理")
-        audio_bytes = _preprocess_pcm16le_bytes(audio_bytes, preprocess_options)
+            task_manager.update_progress(task_id, progress=15, message="准备分块")
 
         if task_id:
             task_manager.update_progress(task_id, progress=20, message="识别中")

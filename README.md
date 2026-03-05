@@ -65,7 +65,7 @@
 - 内网访问：`http://<server-ip>:8200`
 - 监控页面：`http://<server-ip>:8200/monitor`（真实指标来自 `/metrics` 与 `/metrics/prometheus`）
 
-启动（会自动拉起它依赖的远程 ASR 服务：`qwen3-asr`、`vibevoice-asr`）：
+启动（默认只依赖 `qwen3-asr`；VibeVoice 可选）：
 
 ```bash
 ./scripts/start.sh models router
@@ -73,7 +73,16 @@
 
 使用建议：
 - 在 `http://<server-ip>:8200` 打开 UI 后，把「转写选项 → 后端」保持在「当前服务 (相对路径)」，这样**所有请求都走 router**，不需要公司网段直连其它端口。
+- Router 页会出现「目标模型（Router）」下拉：你可以在**单端口**下按需选择本次请求走 `qwen3/vibevoice/pytorch/onnx/...`，并且下拉会实时探测目标是否可用（避免选了一个没启动的容器/端口）。
 - 如果你只需要“单模型转写”（不需要 Qwen3/VibeVoice/多后端），也只需开放 **1 个端口**：`8000`（`docker compose up -d`）。
+
+如果你希望 Router 的长音频/说话人默认走 VibeVoice（可选）：
+
+```bash
+ROUTER_LONG_BACKEND=vibevoice \
+ROUTER_FORCE_VIBEVOICE_WHEN_WITH_SPEAKER=true \
+  docker compose -f docker-compose.models.yml --profile vibevoice --profile router up -d
+```
 
 端口暴露建议（强烈推荐）：
 - 公司内网只放行 `8200`（其余 `810x/820x/8300/900x` 不放行即可）
@@ -145,6 +154,7 @@ docker compose up -d
 | `8201` | `xiyu-qwen3` | ❌ 否 | 同上（Xiyu wrapper） |
 | `8202` | `xiyu-vibevoice` | ❌ 否 | 同上（Xiyu wrapper） |
 | `8300` | `xiyu-diarizer` | ❌ 否 | 说话人分离服务（给后端调用） |
+| `8400` | `xiyu-clearvoice` | ❌ 否 | ClearVoice 降噪微服务（给后端调用） |
 | `9001` | `qwen3-asr` | ❌ 否 | 远程 ASR server（仅调试） |
 | `9002` | `vibevoice-asr` | ❌ 否 | 远程 ASR server（仅调试） |
 
@@ -152,32 +162,36 @@ docker compose up -d
 （按需启动）：
 
 ```bash
-# 0) External diarizer (pyannote) -> http://localhost:8300
+# ClearVoice 降噪微服务（可选） -> http://localhost:8400/health
+# 说明：该服务只提供 /health /info /api/v1/enhance（不提供 Web UI），建议只给 Docker 内部调用即可。
+docker compose -f docker-compose.models.yml --profile clearvoice up -d
+
+# External diarizer (pyannote) -> http://localhost:8300
 # 让任意后端（包括 Whisper/Qwen3）也能输出 speaker_turns
 docker compose -f docker-compose.models.yml --profile diarizer up -d
 
-# 1) PyTorch Paraformer (GPU) -> http://localhost:8101
+# PyTorch Paraformer (GPU) -> http://localhost:8101
 docker compose -f docker-compose.models.yml --profile pytorch up -d
 
-# 2) ONNX (CPU) -> http://localhost:8102
+# ONNX (CPU) -> http://localhost:8102
 docker compose -f docker-compose.models.yml --profile onnx up -d
 
-# 3) SenseVoice (GPU) -> http://localhost:8103
+# SenseVoice (GPU) -> http://localhost:8103
 docker compose -f docker-compose.models.yml --profile sensevoice up -d
 
-# 4) GGUF (CPU) -> http://localhost:8104
+# GGUF (CPU) -> http://localhost:8104
 # 注意：GGUF 需要你提前把模型文件放到 ./data/models/（encoder/ctc/decoder/tokens；见 docker-compose.models.yml 里的 GGUF_* 环境变量）
 # llama.cpp 动态库已内置到 GGUF 镜像中（默认 GGUF_LIB_DIR=/app/llama_cpp/lib），无需额外准备
 docker compose -f docker-compose.models.yml --profile gguf up -d
 
-# 5) Whisper (GPU) -> http://localhost:8105
+# Whisper (GPU) -> http://localhost:8105
 docker compose -f docker-compose.models.yml --profile whisper up -d
 
-# 6) Qwen3-ASR (远程模型容器 + Xiyu 包装) -> http://localhost:8201
+# Qwen3-ASR (远程模型容器 + Xiyu 包装) -> http://localhost:8201
 # 首次启动会 pull 外部镜像，并在容器内从 ModelScope 下载权重（缓存到 modelscope-cache volume）
 docker compose -f docker-compose.models.yml --profile qwen3 up -d
 
-# 7) VibeVoice-ASR (远程模型容器 + Xiyu 包装) -> http://localhost:8202
+# VibeVoice-ASR (远程模型容器 + Xiyu 包装) -> http://localhost:8202
 # 默认使用 ./third_party/VibeVoice（仓库内置最小快照）；权重从 ModelScope 下载
 docker compose -f docker-compose.models.yml --profile vibevoice up -d
 
@@ -296,6 +310,8 @@ docker compose -f docker-compose.models.yml down
 
 提示：
 - 打开任意一个 Xiyu 容器的前端页面后，可在「转写选项 → 后端 → 快速选择」里切换后端端口（`8101/8102/8201/...`），前端会把请求发到你选择的服务（预设会自动使用当前页面的域名/IP，不再固定 `localhost`）。
+- 「后端」下拉展开时会对常用端口做轻量探测（`/api/v1/backend`），并显示“可用/不可用”，方便你在多容器环境里快速判断端口是否真的起起来了。
+- 如果当前后端是 `router`，会额外显示「目标模型（Router）」下拉，并通过 `/api/v1/backend/targets` 探测内部目标是否可达（例如 `qwen3-asr` / `xiyu-pytorch` / `xiyu-whisper`）。
 - 转写页的「全量优化」按钮旁边支持直接选择“融合程度”：仅对比（不走 LLM）/严格/平衡/激进。
 - Whisper 容器使用 `faster-whisper`（CTranslate2）。默认 `WHISPER_MODEL=large-v3`（更准但显存占用更高）；可通过环境变量覆盖（例如 `WHISPER_MODEL=small`）。模型权重会下载到 `WHISPER_DOWNLOAD_ROOT`（默认映射到宿主机 `./data/models/whisper`），不会把镜像撑大。可选：`WHISPER_COMPUTE_TYPE`（cuda 默认 FP16，cpu 默认 INT8）和 `WHISPER_VAD_FILTER=true`（减少静音幻觉/复读）。
 - 如果你希望**任意后端（包括 Qwen3-ASR / Whisper）都输出 `speaker_turns`（说话人1/2/3...）**，推荐启用 external diarizer（`xiyu-diarizer`，pyannote）：
@@ -321,13 +337,25 @@ docker compose -f docker-compose.models.yml down
 
 多容器部署完成后，建议跑一次“全接口/全后端”的自检，确认每个端口都能正常响应。
 
+0) 一键自检（推荐）
+
+```bash
+./script/smoke
+```
+
+说明：
+- 会自动探测本机已启动的 Xiyu 端口（通过探测 `/health`），并执行 `scripts/smoke_all_endpoints.sh` 的全接口检查。
+- 覆盖：`/health`、`/openapi.json`、`/api/v1/preprocess/status`、热词 CRUD（含保存/追加/恢复）、转写（单条/批量/异步文件任务）、metrics 等。
+- 如果你访问某个 `/api/...` 返回的是 HTML（`<!doctype html>`），通常表示该端口服务缺少对应 API 路由，被前端 SPA fallback 接管了：请对对应容器执行 `docker compose up -d --build --force-recreate ...` 重新构建并重建容器。
+- 如需指定端口/跳过远程 vLLM 就绪检查：可设置环境变量 `PORTS=...`、`SKIP_REMOTE_ASR_CHECKS=true`。
+
 1) 健康检查（任选一个端口即可）：
 
 ```bash
 curl -sS http://localhost:8101/health
 ```
 
-2) 全后端转写自检（会分别请求每个端口的 `/api/v1/transcribe`，并额外请求一次全量融合接口 `/api/v1/transcribe/all`）：
+2) 快速转写自检（会分别请求每个端口的 `/api/v1/transcribe`，并额外请求一次全量融合接口 `/api/v1/transcribe/all`）：
 
 ```bash
 # 建议用一段 10~60s 的小音频做 smoke test
@@ -534,7 +562,14 @@ curl -X POST "http://localhost:8101/api/v1/transcribe" \
 ```
 
 说明：
-- Docker 部署时需要容器内能 import `clearvoice`：可 `pip install clearvoice`，或挂载本地 `ClearerVoice-Studio/clearvoice` 并设置 `CLEARVOICE_STUDIO_DIR`（本仓库 compose 已默认尝试按同路径挂载）。
+- 推荐方式：启动 ClearVoice 微服务（`xiyu-clearvoice`），主服务通过 `CLEARVOICE_SERVICE_BASE_URL` 调用（本仓库 compose 默认已设置为 `http://xiyu-clearvoice:8000`）。这样每个 ASR 容器无需单独初始化/加载 ClearVoice。
+  - 单模型：`docker compose --profile clearvoice up -d`
+  - 多模型：`docker compose -f docker-compose.models.yml --profile clearvoice up -d`
+- 如需让 ClearVoice 用 GPU（默认为了不抢 ASR 显存会强制 CPU）：
+  - 设置 `CLEARVOICE_FORCE_CPU=false`
+  - 并给 clearvoice 服务设置 `CLEARVOICE_DEVICE=cuda`、`CLEARVOICE_NGPU=1`（或按需调整）
+  - 可用 `curl http://localhost:8400/info` 查看 clearvoice 服务是否识别到 CUDA
+- 不启用微服务也可以：让 `CLEARVOICE_SERVICE_BASE_URL=` 置空，然后在 ASR 容器内 `pip install clearvoice` 或挂载本地 `ClearerVoice-Studio/clearvoice` 并设置 `CLEARVOICE_STUDIO_DIR`（本仓库 compose 已默认尝试按同路径挂载）。
 - 前端 UI 里也有「ClearVoice 降噪」开关，会自动在单次请求里写入同样的 `asr_options.preprocess`。
 
 示例：会议/回忆转录（说话人 + turn 合并 + 数字标签）

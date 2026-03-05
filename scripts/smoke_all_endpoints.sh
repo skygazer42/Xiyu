@@ -265,6 +265,17 @@ _test_one_base() {
   if _curl_json "${base}/api/v1/backend"; then _ok "${base} GET /api/v1/backend"; else _fail "${base} GET /api/v1/backend"; fi
   if _curl_json "${base}/api/v1/backend/targets"; then _ok "${base} GET /api/v1/backend/targets"; else _fail "${base} GET /api/v1/backend/targets"; fi
 
+  tmp="$(_tmpfile)"
+  code="$(_curl_to_file "${tmp}" "${base}/api/v1/preprocess/status")"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_json_code "${tmp}" 0 >/dev/null 2>&1; then
+    _ok "${base} GET /api/v1/preprocess/status"
+  else
+    echo "ERROR HTTP ${code}: ${base}/api/v1/preprocess/status" >&2
+    _print_body_head "${tmp}"
+    _fail "${base} GET /api/v1/preprocess/status"
+  fi
+  rm -f "${tmp}" || true
+
   if _curl_json "${base}/metrics"; then _ok "${base} GET /metrics"; else _fail "${base} GET /metrics"; fi
   if _curl_text "${base}/metrics/prometheus"; then _ok "${base} GET /metrics/prometheus"; else _fail "${base} GET /metrics/prometheus"; fi
 

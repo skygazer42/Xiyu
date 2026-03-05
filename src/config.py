@@ -311,6 +311,21 @@ class Settings(BaseSettings):
     clearvoice_chunk_duration_s: float = 30.0
     clearvoice_overlap_duration_s: float = 0.5
 
+    # ------------------------------------------------------------
+    # ClearVoice as a dedicated microservice (optional)
+    # ------------------------------------------------------------
+    # If set, AudioPreprocessor will call this service for ClearVoice denoise
+    # instead of importing/initializing ClearerVoice-Studio in-process.
+    # Example: http://xiyu-clearvoice:8000
+    clearvoice_service_base_url: str = ""
+    # Timeout for a single enhance request (seconds). Keep generous for CPU.
+    clearvoice_service_timeout_s: float = 600.0
+    # Health probe timeout (seconds).
+    clearvoice_service_health_timeout_s: float = 2.0
+    # Safety: maximum input duration the ClearVoice service will accept (seconds).
+    # (Router long-audio should call it per-chunk instead of sending multi-hour audio.)
+    clearvoice_service_max_duration_s: float = 600.0
+
     # 流式文本去重配置
     stream_dedup_enable: bool = True             # 启用流式去重
     stream_dedup_overlap: int = 5                # 重叠检查字符数

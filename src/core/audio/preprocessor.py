@@ -374,9 +374,18 @@ class AudioPreprocessor:
 
         backend = str(self.denoise_backend or "").strip().lower()
 
-        # 使用 ClearVoice (ClearerVoice-Studio)
+        # 使用 ClearVoice (ClearerVoice-Studio) - local or via microservice.
         if backend.startswith("clearvoice"):
             try:
+                # Prefer a dedicated service when configured (keeps ASR containers lighter).
+                from src.config import settings
+
+                base_url = str(getattr(settings, "clearvoice_service_base_url", "") or "").strip()
+                if base_url:
+                    from src.core.audio.clearvoice_service_client import clearvoice_service_enhance
+
+                    return clearvoice_service_enhance(audio, sample_rate=sample_rate)
+
                 from src.core.audio.clearvoice_denoise import clearvoice_enhance
 
                 return clearvoice_enhance(audio, sample_rate=sample_rate)

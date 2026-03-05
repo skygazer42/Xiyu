@@ -2317,6 +2317,81 @@ class TranscriptionEngine:
         # Per-request overrides (do not mutate globals).
         chunker = self._get_request_chunker(asr_options)
         post_processor = self._get_request_post_processor(asr_options)
+        preprocess_options = None
+        if isinstance(asr_options, dict):
+            preprocess_options = asr_options.get("preprocess")
+        if not isinstance(preprocess_options, dict):
+            preprocess_options = None
+
+        # Request-scoped audio preprocessing:
+        # - Short audio (direct): allow full preprocessing (trim/denoise/normalize...)
+        # - Long audio (chunked): apply only length-preserving preprocessing per chunk
+        #   to keep timestamps stable and avoid holding a full "denoised copy" of hours-long meetings.
+        from src.core.audio import AudioPreprocessor
+
+        _pre_cfg = {
+            "target_db": settings.audio_normalize_target_db,
+            "silence_threshold_db": settings.audio_silence_threshold_db,
+            "min_silence_ms": 500,
+            "normalize_enable": settings.audio_normalize_enable,
+            "normalize_robust_rms_enable": False,
+            "normalize_robust_rms_percentile": 95.0,
+            "trim_silence_enable": settings.audio_trim_silence_enable,
+            "denoise_enable": settings.audio_denoise_enable,
+            "denoise_prop": settings.audio_denoise_prop,
+            "denoise_backend": settings.audio_denoise_backend,
+            "vocal_separate_enable": settings.audio_vocal_separate_enable,
+            "vocal_separate_model": settings.audio_vocal_separate_model,
+            "device": settings.device,
+            "adaptive_enable": settings.audio_adaptive_preprocess,
+            "snr_threshold": settings.audio_snr_threshold,
+            # Defaults match API layer behavior.
+            "remove_dc_offset": True,
+            "highpass_enable": False,
+            "highpass_cutoff_hz": 80.0,
+            "soft_limit_enable": False,
+            "soft_limit_target": 0.98,
+            "soft_limit_knee": 2.0,
+        }
+        if preprocess_options:
+            for k, v in preprocess_options.items():
+                if k in _pre_cfg:
+                    _pre_cfg[k] = v
+
+        preprocessor_full = AudioPreprocessor(**_pre_cfg)
+        should_preprocess_full = (
+            getattr(preprocessor_full, "remove_dc_offset", True)
+            or getattr(preprocessor_full, "highpass_enable", False)
+            or getattr(preprocessor_full, "soft_limit_enable", False)
+            or preprocessor_full.normalize_enable
+            or preprocessor_full.trim_silence_enable
+            or preprocessor_full.denoise_enable
+            or preprocessor_full.vocal_separate_enable
+            or preprocessor_full.adaptive_enable
+        )
+
+        # Chunked path must keep length stable; disable operations that can shift timestamps.
+        _chunk_cfg = dict(_pre_cfg)
+        # NOTE: Adaptive mode may enable trimming internally; disable it for chunking.
+        if bool(_chunk_cfg.get("adaptive_enable", False)):
+            logger.info("Long-audio chunking: disabling adaptive preprocessing to keep timestamps stable")
+        if bool(_chunk_cfg.get("trim_silence_enable", False)):
+            logger.info("Long-audio chunking: ignoring trim_silence_enable to keep timestamps stable")
+        if bool(_chunk_cfg.get("vocal_separate_enable", False)):
+            logger.info("Long-audio chunking: ignoring vocal_separate_enable to keep timestamps stable")
+
+        _chunk_cfg["adaptive_enable"] = False
+        _chunk_cfg["trim_silence_enable"] = False
+        _chunk_cfg["vocal_separate_enable"] = False
+
+        preprocessor_chunk = AudioPreprocessor(**_chunk_cfg)
+        should_preprocess_chunk = (
+            getattr(preprocessor_chunk, "remove_dc_offset", True)
+            or getattr(preprocessor_chunk, "highpass_enable", False)
+            or getattr(preprocessor_chunk, "soft_limit_enable", False)
+            or preprocessor_chunk.normalize_enable
+            or preprocessor_chunk.denoise_enable
+        )
 
         chunking_options = None
         if isinstance(asr_options, dict):
@@ -2397,6 +2472,9 @@ class TranscriptionEngine:
         duration = len(audio) / sample_rate
         if duration <= chunker.max_chunk_duration:
             logger.info(f"Audio is short ({duration:.1f}s), using direct transcription")
+            if should_preprocess_full:
+                audio = preprocessor_full.process(audio, sample_rate=sample_rate, validate=False)
+                audio_pcm_bytes = float32_to_pcm16le_bytes(audio)
             return self.transcribe(
                 audio_pcm_bytes or audio_input,
                 with_speaker=with_speaker,
@@ -2457,6 +2535,10 @@ class TranscriptionEngine:
 
         # 定义单块转写函数
         def transcribe_chunk(chunk_audio: np.ndarray) -> Dict[str, Any]:
+            # Apply length-preserving preprocessing per chunk (optional).
+            if should_preprocess_chunk:
+                chunk_audio = preprocessor_chunk.process(chunk_audio, sample_rate=sample_rate, validate=False)
+
             # Always use PCM bytes for backend compatibility (remote backends don't accept numpy).
             chunk_bytes = float32_to_pcm16le_bytes(chunk_audio)
 
@@ -2540,6 +2622,10 @@ class TranscriptionEngine:
                 batch_bytes: List[bytes] = []
                 batch_meta: List[tuple[int, int]] = []
                 for chunk_audio, start_sample, end_sample in batch:
+                    if should_preprocess_chunk:
+                        chunk_audio = preprocessor_chunk.process(
+                            chunk_audio, sample_rate=sample_rate, validate=False
+                        )
                     batch_bytes.append(float32_to_pcm16le_bytes(chunk_audio))
                     batch_meta.append((int(start_sample), int(end_sample)))
 

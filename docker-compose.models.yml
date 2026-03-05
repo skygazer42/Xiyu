@@ -102,6 +102,11 @@ x-xiyu-env: &xiyu-env
   CLEARVOICE_FORCE_CPU: ${CLEARVOICE_FORCE_CPU:-true}
   CLEARVOICE_CHUNK_DURATION_S: ${CLEARVOICE_CHUNK_DURATION_S:-30.0}
   CLEARVOICE_OVERLAP_DURATION_S: ${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
+  # Offload ClearVoice denoise to a dedicated microservice (recommended).
+  # Leave empty to use in-process ClearerVoice-Studio import instead.
+  CLEARVOICE_SERVICE_BASE_URL: ${CLEARVOICE_SERVICE_BASE_URL:-http://xiyu-clearvoice:8000}
+  CLEARVOICE_SERVICE_TIMEOUT_S: ${CLEARVOICE_SERVICE_TIMEOUT_S:-600.0}
+  CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S: ${CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S:-2.0}
 
   # Default runtime settings (can be overridden per-service).
   DEVICE: ${DEVICE:-cuda}
@@ -165,6 +170,44 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
     logging: *xiyu-logging
+
+  # ======================
+  # ClearVoice (denoise)
+  # ======================
+  xiyu-clearvoice:
+    <<: *xiyu-base
+    profiles: ["clearvoice", "all"]
+    container_name: xiyu-clearvoice
+    ports:
+      - "${PORT_CLEARVOICE:-8400}:8000"
+    # Persist ClearVoice checkpoints on the host (ClearerVoice-Studio defaults to ./checkpoints/...).
+    volumes:
+      - ./data:/app/data
+      - ./data/models/clearvoice:/app/checkpoints
+      - model-cache:/root/.cache/modelscope
+      - huggingface-cache:/root/.cache/huggingface
+      - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
+    environment:
+      <<: *proxy-env
+      DEVICE: ${CLEARVOICE_DEVICE:-cpu}
+      NGPU: ${CLEARVOICE_NGPU:-0}
+      NCPU: ${CLEARVOICE_NCPU:-4}
+      CLEARVOICE_ENABLE: ${CLEARVOICE_ENABLE:-true}
+      CLEARVOICE_STUDIO_DIR: ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
+      CLEARVOICE_MODEL: ${CLEARVOICE_MODEL:-FRCRN_SE_16K}
+      CLEARVOICE_FORCE_CPU: ${CLEARVOICE_FORCE_CPU:-true}
+      CLEARVOICE_CHUNK_DURATION_S: ${CLEARVOICE_CHUNK_DURATION_S:-30.0}
+      CLEARVOICE_OVERLAP_DURATION_S: ${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
+      CLEARVOICE_SERVICE_MAX_DURATION_S: ${CLEARVOICE_SERVICE_MAX_DURATION_S:-600.0}
+      CLEARVOICE_WARMUP_ON_STARTUP: ${CLEARVOICE_WARMUP_ON_STARTUP:-false}
+    command: ["python", "-m", "uvicorn", "src.clearvoice_service:app", "--host", "0.0.0.0", "--port", "8000"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ======================
   # Local (in-process) ASR

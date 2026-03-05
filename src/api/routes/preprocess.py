@@ -52,6 +52,7 @@ def _try_import_clearvoice(studio_dir: str) -> Tuple[bool, Optional[str]]:
 async def get_preprocess_status() -> Dict[str, Any]:
     """Return best-effort availability of optional preprocessing backends."""
     clearvoice_enabled = bool(getattr(settings, "clearvoice_enable", True))
+    clearvoice_service_base_url = str(getattr(settings, "clearvoice_service_base_url", "") or "").strip().rstrip("/")
     studio_dir = str(getattr(settings, "clearvoice_studio_dir", "") or "")
     studio_exists = False
     if studio_dir:
@@ -64,7 +65,26 @@ async def get_preprocess_status() -> Dict[str, Any]:
     clearvoice_ok = False
     clearvoice_err: Optional[str] = None
     if clearvoice_enabled:
-        clearvoice_ok, clearvoice_err = _try_import_clearvoice(studio_dir)
+        if clearvoice_service_base_url:
+            # Probe the dedicated ClearVoice service instead of importing locally.
+            try:
+                import httpx
+
+                timeout_s = float(getattr(settings, "clearvoice_service_health_timeout_s", 2.0) or 2.0)
+                if timeout_s <= 0:
+                    timeout_s = 2.0
+                async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
+                    resp = await client.get(f"{clearvoice_service_base_url}/health")
+                    if 200 <= int(resp.status_code) < 300:
+                        clearvoice_ok, clearvoice_err = True, None
+                    else:
+                        clearvoice_ok = False
+                        clearvoice_err = f"service unhealthy (HTTP {resp.status_code})"
+            except Exception as e:
+                clearvoice_ok = False
+                clearvoice_err = f"service probe failed: {e}"
+        else:
+            clearvoice_ok, clearvoice_err = _try_import_clearvoice(studio_dir)
     else:
         clearvoice_ok = False
         clearvoice_err = "disabled (CLEARVOICE_ENABLE=false)"
@@ -80,7 +100,9 @@ async def get_preprocess_status() -> Dict[str, Any]:
         "preprocess": {
             "clearvoice": {
                 "enabled": clearvoice_enabled,
+                "mode": "remote" if bool(clearvoice_service_base_url) else "local",
                 "available": bool(clearvoice_ok),
+                "service_base_url": clearvoice_service_base_url,
                 "studio_dir": studio_dir,
                 "studio_dir_exists": bool(studio_exists),
                 "error": clearvoice_err,
@@ -90,4 +112,3 @@ async def get_preprocess_status() -> Dict[str, Any]:
             "noisereduce": {"available": bool(noisereduce_ok), "error": noisereduce_err},
         },
     }
-
