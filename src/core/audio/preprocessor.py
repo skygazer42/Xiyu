@@ -372,8 +372,21 @@ class AudioPreprocessor:
         if len(audio) == 0:
             return audio
 
+        backend = str(self.denoise_backend or "").strip().lower()
+
+        # 使用 ClearVoice (ClearerVoice-Studio)
+        if backend.startswith("clearvoice"):
+            try:
+                from src.core.audio.clearvoice_denoise import clearvoice_enhance
+
+                return clearvoice_enhance(audio, sample_rate=sample_rate)
+            except Exception as e:
+                # Fail fast: user explicitly requested ClearVoice denoise.
+                logger.error("ClearVoice denoise failed: %s", e, exc_info=True)
+                raise
+
         # 使用 DeepFilterNet (v2 或 v3)
-        if self.denoise_backend in ("deepfilter", "deepfilter3"):
+        if backend in ("deepfilter", "deepfilter3"):
             if self.deep_denoiser is not None:
                 return self.deep_denoiser.enhance(audio, sample_rate)
             logger.warning("DeepFilterNet not available, falling back to noisereduce")

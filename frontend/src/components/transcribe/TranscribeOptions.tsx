@@ -65,6 +65,8 @@ export function TranscribeOptions() {
     setAdvancedAsrOptionsText,
     advancedAsrOptionsError,
     setAdvancedAsrOptionsError,
+    preprocess,
+    setPreprocess,
   } = useTranscriptionStore()
   const { baseUrl, setBaseUrl } = useBackendStore()
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -374,6 +376,27 @@ export function TranscribeOptions() {
               </p>
             </div>
           </div>
+        ) : null}
+
+        {/* 音频增强：ClearVoice 降噪（可选） */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Sparkles className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <Label htmlFor="clearvoice-denoise" className="text-base">ClearVoice 降噪</Label>
+              <p className="text-sm text-muted-foreground">先降噪再识别（更准但更慢）</p>
+            </div>
+          </div>
+          <Switch
+            id="clearvoice-denoise"
+            checked={preprocess.clearvoice_denoise_enable}
+            onCheckedChange={(checked) => setPreprocess({ clearvoice_denoise_enable: checked })}
+          />
+        </div>
+        {preprocess.clearvoice_denoise_enable ? (
+          <p className="text-xs text-muted-foreground ml-8">
+            需要服务端安装 ClearerVoice-Studio 依赖或挂载 `CLEARVOICE_STUDIO_DIR`；否则任务会失败。
+          </p>
         ) : null}
 
         {/* 说话人识别 */}

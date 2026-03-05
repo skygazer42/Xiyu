@@ -95,6 +95,14 @@ x-xiyu-env: &xiyu-env
   SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
   SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}
 
+  # ClearVoice (optional speech enhancement / denoise)
+  CLEARVOICE_ENABLE: ${CLEARVOICE_ENABLE:-true}
+  CLEARVOICE_STUDIO_DIR: ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
+  CLEARVOICE_MODEL: ${CLEARVOICE_MODEL:-FRCRN_SE_16K}
+  CLEARVOICE_FORCE_CPU: ${CLEARVOICE_FORCE_CPU:-true}
+  CLEARVOICE_CHUNK_DURATION_S: ${CLEARVOICE_CHUNK_DURATION_S:-30.0}
+  CLEARVOICE_OVERLAP_DURATION_S: ${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
+
   # Default runtime settings (can be overridden per-service).
   DEVICE: ${DEVICE:-cuda}
   NGPU: ${NGPU:-1}
@@ -104,6 +112,8 @@ x-xiyu-volumes: &xiyu-volumes
   - ./data:/app/data
   - model-cache:/root/.cache/modelscope
   - huggingface-cache:/root/.cache/huggingface
+  # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise.
+  - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
 
 x-xiyu-logging: &xiyu-logging
   driver: "json-file"
@@ -196,6 +206,8 @@ services:
       - ./data:/app/data
       - model-cache:/root/.cache/modelscope
       - huggingface-cache:/root/.cache/huggingface
+      # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise.
+      - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
       - onnx-cache:/root/.cache/funasr_onnx
     environment:
       <<: *xiyu-env

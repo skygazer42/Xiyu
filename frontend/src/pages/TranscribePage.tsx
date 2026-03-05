@@ -38,6 +38,53 @@ const URL_TASK_MAX_POLL_MS = 10 * 60 * 1000
 const FILE_TASK_MAX_POLL_MS = 24 * 60 * 60 * 1000
 const TASKS_STORAGE_KEY = 'xiyu_async_tasks_v1'
 
+function buildMergedAsrOptionsText(
+  advancedText: string,
+  preprocess: { clearvoice_denoise_enable: boolean }
+): string | undefined {
+  const raw = (advancedText || '').trim()
+  let obj: Record<string, unknown> = {}
+
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        obj = parsed as Record<string, unknown>
+      } else {
+        // Keep invalid types as-is; backend/UI will reject on submit anyway.
+        return raw
+      }
+    } catch {
+      // Keep invalid JSON as-is; submit is blocked by advancedAsrOptionsError.
+      return raw
+    }
+  }
+
+  let changed = false
+
+  if (preprocess.clearvoice_denoise_enable) {
+    const existing = obj.preprocess
+    const preprocessSection: Record<string, unknown> =
+      existing && typeof existing === 'object' && !Array.isArray(existing)
+        ? { ...(existing as Record<string, unknown>) }
+        : {}
+    preprocessSection.denoise_enable = true
+    preprocessSection.denoise_backend = 'clearvoice'
+    obj = { ...obj, preprocess: preprocessSection }
+    changed = true
+  }
+
+  if (!raw && !changed) {
+    return undefined
+  }
+
+  if (!changed) {
+    return raw
+  }
+
+  return JSON.stringify(obj)
+}
+
 export default function TranscribePage() {
   const {
     files,
@@ -47,6 +94,7 @@ export default function TranscribePage() {
     tempHotwords,
     advancedAsrOptionsText,
     advancedAsrOptionsError,
+    preprocess,
     result,
     setResult,
     isTranscribing,
@@ -80,6 +128,10 @@ export default function TranscribePage() {
   const ensembleButtonLabel = useMemo(() => {
     return ensembleOptions.apply_llm ? '全量优化' : '全量对比'
   }, [ensembleOptions.apply_llm])
+
+  const mergedAsrOptionsText = useMemo(() => {
+    return buildMergedAsrOptionsText(advancedAsrOptionsText, preprocess)
+  }, [advancedAsrOptionsText, preprocess])
 
   const taskPollingTimersRef = useRef<Record<string, number>>({})
   const taskPollingStartedAtRef = useRef<Record<string, number>>({})
@@ -353,7 +405,7 @@ export default function TranscribePage() {
         const transcribeOptions = {
           ...options,
           hotwords: tempHotwords || undefined,
-          asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
+          asrOptionsText: mergedAsrOptionsText,
         }
 
       if (files.length === 1) {
@@ -498,7 +550,7 @@ export default function TranscribePage() {
         llm_role: ensembleOptions.llm_role,
         include_srt: ensembleOptions.include_srt,
         hotwords: tempHotwords || undefined,
-        asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
+        asrOptionsText: mergedAsrOptionsText,
         speaker_label_style: options.speaker_label_style,
       }
 
@@ -566,9 +618,9 @@ export default function TranscribePage() {
     return {
       ...options,
       hotwords: tempHotwords || undefined,
-      asrOptionsText: advancedAsrOptionsText.trim() ? advancedAsrOptionsText : undefined,
+      asrOptionsText: mergedAsrOptionsText,
     }
-  }, [advancedAsrOptionsText, options, tempHotwords])
+  }, [mergedAsrOptionsText, options, tempHotwords])
 
   const urlTasks = useMemo(() => asyncTasks.filter((t) => t.kind === 'url'), [asyncTasks])
   const fileTasks = useMemo(() => asyncTasks.filter((t) => t.kind === 'file'), [asyncTasks])

@@ -13,12 +13,21 @@ services:
       - ./data:/app/data
       - model-cache:/root/.cache/modelscope
       - huggingface-cache:/root/.cache/huggingface
+      # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise
+      - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
     environment:
       - DEVICE=cpu
       - NGPU=0
       - NCPU=${NCPU:-8}
       - DEBUG=${DEBUG:-false}
       - HOTWORDS_THRESHOLD=${HOTWORDS_THRESHOLD:-0.85}
+      # ClearVoice (optional)
+      - CLEARVOICE_ENABLE=${CLEARVOICE_ENABLE:-true}
+      - CLEARVOICE_STUDIO_DIR=${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
+      - CLEARVOICE_MODEL=${CLEARVOICE_MODEL:-FRCRN_SE_16K}
+      - CLEARVOICE_FORCE_CPU=${CLEARVOICE_FORCE_CPU:-true}
+      - CLEARVOICE_CHUNK_DURATION_S=${CLEARVOICE_CHUNK_DURATION_S:-30.0}
+      - CLEARVOICE_OVERLAP_DURATION_S=${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
       - SPEAKER_UNSUPPORTED_BEHAVIOR=${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
       - SPEAKER_EXTERNAL_DIARIZER_ENABLE=${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-false}
       - SPEAKER_EXTERNAL_DIARIZER_BASE_URL=${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://xiyu-diarizer:8000}

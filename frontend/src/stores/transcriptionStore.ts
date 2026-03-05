@@ -26,6 +26,12 @@ interface TranscriptionState {
   advancedAsrOptionsError: string | null
   setAdvancedAsrOptionsError: (error: string | null) => void
 
+  // 音频预处理（前端可控开关，会合并进 asr_options.preprocess）
+  preprocess: {
+    clearvoice_denoise_enable: boolean
+  }
+  setPreprocess: (updates: Partial<TranscriptionState['preprocess']>) => void
+
   // 临时热词
   tempHotwords: string
   setTempHotwords: (hotwords: string) => void
@@ -85,6 +91,13 @@ export const useTranscriptionStore = create<TranscriptionState>((set) => ({
   advancedAsrOptionsError: null,
   setAdvancedAsrOptionsError: (advancedAsrOptionsError) => set({ advancedAsrOptionsError }),
 
+  // 音频预处理
+  preprocess: {
+    clearvoice_denoise_enable: false,
+  },
+  setPreprocess: (updates) =>
+    set((state) => ({ preprocess: { ...state.preprocess, ...updates } })),
+
   // 临时热词
   tempHotwords: '',
   setTempHotwords: (tempHotwords) => set({ tempHotwords }),
@@ -117,6 +130,9 @@ export const useTranscriptionStore = create<TranscriptionState>((set) => ({
       tempHotwords: '',
       advancedAsrOptionsText: '',
       advancedAsrOptionsError: null,
+      preprocess: {
+        clearvoice_denoise_enable: false,
+      },
       options: defaultOptions,
       ensembleOptions: defaultEnsembleOptions,
     }),

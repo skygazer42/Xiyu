@@ -524,6 +524,18 @@ curl -X POST "http://localhost:8101/api/v1/transcribe" \
   -F 'asr_options={"preprocess":{"adaptive_enable":true,"snr_threshold":20,"denoise_enable":true}}'
 ```
 
+示例：使用 ClearVoice（ClearerVoice-Studio）做高质量降噪（更准但更慢）
+
+```bash
+curl -X POST "http://localhost:8101/api/v1/transcribe" \
+  -F "file=@/path/to/audio.wav" \
+  -F 'asr_options={"preprocess":{"denoise_enable":true,"denoise_backend":"clearvoice"}}'
+```
+
+说明：
+- Docker 部署时需要容器内能 import `clearvoice`：可 `pip install clearvoice`，或挂载本地 `ClearerVoice-Studio/clearvoice` 并设置 `CLEARVOICE_STUDIO_DIR`（本仓库 compose 已默认尝试按同路径挂载）。
+- 前端 UI 里也有「ClearVoice 降噪」开关，会自动在单次请求里写入同样的 `asr_options.preprocess`。
+
 示例：会议/回忆转录（说话人 + turn 合并 + 数字标签）
 
 ```bash

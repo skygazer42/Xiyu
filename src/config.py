@@ -261,6 +261,27 @@ class Settings(BaseSettings):
     audio_adaptive_preprocess: bool = False      # 自适应预处理 (根据 SNR 智能选择)
     audio_snr_threshold: float = 20.0            # SNR 阈值 (低于此值启用降噪)
 
+    # ------------------------------------------------------------
+    # ClearVoice (ClearerVoice-Studio) speech enhancement (optional)
+    # ------------------------------------------------------------
+    # Enable ClearVoice integration as a denoise backend: set per-request
+    # `asr_options.preprocess.denoise_backend=clearvoice_frcrn` (and denoise_enable=true).
+    #
+    # Notes:
+    # - ClearVoice is heavier than noisereduce/deepfilter; expect slower processing.
+    # - We default to CPU to avoid stealing VRAM from ASR models.
+    clearvoice_enable: bool = True
+    # If `clearvoice` is not installed, add this directory to `sys.path` and try importing
+    # from the local ClearerVoice-Studio checkout (e.g. /data/ClearerVoice-Studio/clearvoice).
+    clearvoice_studio_dir: str = "/data/ClearerVoice-Studio/clearvoice"
+    # Speech enhancement model name (16k): FRCRN_SE_16K / MossFormerGAN_SE_16K
+    clearvoice_model: str = "FRCRN_SE_16K"
+    # Force ClearVoice to run on CPU even if CUDA is available (recommended for single-GPU ASR servers).
+    clearvoice_force_cpu: bool = True
+    # Long audio: process enhancement in chunks to avoid huge tensors.
+    clearvoice_chunk_duration_s: float = 30.0
+    clearvoice_overlap_duration_s: float = 0.5
+
     # 流式文本去重配置
     stream_dedup_enable: bool = True             # 启用流式去重
     stream_dedup_overlap: int = 5                # 重叠检查字符数

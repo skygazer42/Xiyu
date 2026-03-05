@@ -137,7 +137,7 @@ async def get_backend_targets() -> BackendTargetsResponse:
             return ""
         b_type = str(info.get("type") or "").strip().lower()
         if b_type == "xiyu_proxy":
-            return f"{base_url}/api/v1/health"
+            return f"{base_url}/health"
         # Remote OpenAI-compatible servers: probe /v1/models.
         return f"{base_url}/v1/models"
 

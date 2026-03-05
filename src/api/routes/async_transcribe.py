@@ -20,10 +20,11 @@ import ffmpeg
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.api.asr_options import parse_asr_options
-from src.api.dependencies import process_audio_file
+from src.api.dependencies import process_audio_file, _build_request_preprocessor
 from src.config import settings
 from src.core.engine import transcription_engine
 from src.core.task_manager import task_manager, TaskStatus
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,42 @@ async def _save_upload_file(upload: UploadFile, dest_path: Path, *, chunk_size: 
             await out.write(chunk)
 
 
+def _convert_path_to_pcm16le_bytes(input_path: str) -> bytes:
+    """Convert any audio/video file to 16kHz mono PCM16LE bytes (s16le)."""
+    try:
+        audio_bytes, _ = (
+            ffmpeg
+            .input(str(input_path), threads=0)
+            .output("-", format="s16le", acodec="pcm_s16le", ac=1, ar=16000)
+            .run(cmd=["ffmpeg", "-nostdin"], capture_stdout=True, capture_stderr=True)
+        )
+        return audio_bytes
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode() if e.stderr else str(e)}")
+        raise
+
+
+def _preprocess_pcm16le_bytes(pcm16le: bytes, preprocess_options: Optional[dict]) -> bytes:
+    """Apply request-scoped audio preprocessing (normalize/denoise/etc) to PCM16LE bytes."""
+    preprocessor = _build_request_preprocessor(preprocess_options)
+
+    should_process = (
+        getattr(preprocessor, "remove_dc_offset", True)
+        or getattr(preprocessor, "highpass_enable", False)
+        or getattr(preprocessor, "soft_limit_enable", False)
+        or preprocessor.normalize_enable
+        or preprocessor.trim_silence_enable
+        or preprocessor.denoise_enable
+        or preprocessor.vocal_separate_enable
+    )
+    if not should_process or not pcm16le:
+        return pcm16le
+
+    audio_array = np.frombuffer(pcm16le, dtype=np.int16).astype(np.float32) / 32768.0
+    audio_array = preprocessor.process(audio_array, sample_rate=16000, validate=False)
+    return (audio_array * 32768.0).astype(np.int16).tobytes()
+
+
 def _handle_url_transcribe(payload: dict) -> dict:
     """
     处理 URL 转写任务
@@ -129,8 +166,6 @@ def _handle_url_transcribe(payload: dict) -> dict:
     ext = os.path.splitext(filename)[1].lower() or ".wav"
 
     temp_download = None
-    temp_wav = None
-
     try:
         # 下载文件
         if task_id:
@@ -149,18 +184,12 @@ def _handle_url_transcribe(payload: dict) -> dict:
         # 转换格式
         if task_id:
             task_manager.update_progress(task_id, progress=10, message="转换音频")
-        temp_wav = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".wav", dir=str(settings.uploads_dir)
-        )
-        temp_wav.close()
+        audio_bytes = _convert_path_to_pcm16le_bytes(temp_download.name)
 
-        convert_audio_to_pcm(temp_download.name, temp_wav.name)
-
-        # 读取转换后的音频
+        preprocess_options = (asr_options or {}).get("preprocess") if isinstance(asr_options, dict) else None
         if task_id:
-            task_manager.update_progress(task_id, progress=15, message="读取音频")
-        with open(temp_wav.name, "rb") as f:
-            audio_bytes = f.read()
+            task_manager.update_progress(task_id, progress=15, message="音频预处理")
+        audio_bytes = _preprocess_pcm16le_bytes(audio_bytes, preprocess_options)
 
         # 执行转写
         if task_id:
@@ -207,8 +236,6 @@ def _handle_url_transcribe(payload: dict) -> dict:
         # 清理临时文件
         if temp_download and os.path.exists(temp_download.name):
             os.unlink(temp_download.name)
-        if temp_wav and os.path.exists(temp_wav.name):
-            os.unlink(temp_wav.name)
 
 
 # 注册任务处理器
@@ -236,19 +263,15 @@ def _handle_file_transcribe(payload: dict) -> dict:
     target_backend = payload.get("target_backend")
     asr_options = payload.get("asr_options")
 
-    temp_wav = None
     try:
         if task_id:
             task_manager.update_progress(task_id, progress=10, message="转换音频")
-        temp_wav = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".wav", dir=str(settings.uploads_dir)
-        )
-        temp_wav.close()
-        convert_audio_to_pcm(str(input_path), temp_wav.name)
+        audio_bytes = _convert_path_to_pcm16le_bytes(str(input_path))
 
+        preprocess_options = (asr_options or {}).get("preprocess") if isinstance(asr_options, dict) else None
         if task_id:
-            task_manager.update_progress(task_id, progress=15, message="读取音频")
-        audio_bytes = Path(temp_wav.name).read_bytes()
+            task_manager.update_progress(task_id, progress=15, message="音频预处理")
+        audio_bytes = _preprocess_pcm16le_bytes(audio_bytes, preprocess_options)
 
         if task_id:
             task_manager.update_progress(task_id, progress=20, message="识别中")
@@ -291,11 +314,6 @@ def _handle_file_transcribe(payload: dict) -> dict:
         try:
             if input_path and os.path.exists(str(input_path)):
                 os.unlink(str(input_path))
-        except Exception:
-            pass
-        try:
-            if temp_wav and os.path.exists(temp_wav.name):
-                os.unlink(temp_wav.name)
         except Exception:
             pass
 
