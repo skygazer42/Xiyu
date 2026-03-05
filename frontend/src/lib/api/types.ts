@@ -58,7 +58,7 @@ export interface UrlTranscribeRequest {
   asr_options?: string
 }
 
-export interface UrlTranscribeResponse {
+export interface AsyncTaskSubmitResponse {
   code: number
   status: 'success' | 'error'
   message: string
@@ -66,6 +66,10 @@ export interface UrlTranscribeResponse {
     task_id: string
   }
 }
+
+export type UrlTranscribeResponse = AsyncTaskSubmitResponse
+
+export type FileTranscribeResponse = AsyncTaskSubmitResponse
 
 // 异步任务相关
 export interface TaskResultRequest {
@@ -77,7 +81,9 @@ export interface TaskResultResponse {
   code: number
   status: 'pending' | 'processing' | 'success' | 'error'
   message: string
-  data?: { task_id: string } | TranscribeResponse
+  data?:
+    | { task_id: string; progress?: number | null; detail?: string | null }
+    | TranscribeResponse
 }
 
 // 视频转写相关

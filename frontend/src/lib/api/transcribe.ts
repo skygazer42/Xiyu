@@ -6,6 +6,7 @@ import type {
   EnsembleTranscribeResponse,
   EnsembleLlmRole,
   UrlTranscribeResponse,
+  FileTranscribeResponse,
   TaskResultResponse,
   VideoTranscribeResponse,
   WhisperAsrResponse,
@@ -314,6 +315,65 @@ export async function transcribeUrl(
     },
     signal,
     baseURL: overrides.baseURL,
+  })
+  return response.data
+}
+
+/**
+ * 文件转写 (异步任务，适合 3-4 小时会议长音频)
+ */
+export async function transcribeFileAsync(
+  file: File,
+  options: TranscribeWithProgressOptions = {},
+  overrides: ApiRequestOverrides = {}
+): Promise<FileTranscribeResponse> {
+  const { onUploadProgress, signal, asrOptionsText, ...transcribeOptions } = options
+  const formData = new FormData()
+  formData.append('file', file)
+
+  if (transcribeOptions.with_speaker !== undefined) {
+    formData.append('with_speaker', String(transcribeOptions.with_speaker))
+  }
+  if (transcribeOptions.apply_hotword !== undefined) {
+    formData.append('apply_hotword', String(transcribeOptions.apply_hotword))
+  }
+  if (transcribeOptions.apply_llm !== undefined) {
+    formData.append('apply_llm', String(transcribeOptions.apply_llm))
+  }
+  if (transcribeOptions.llm_role) {
+    formData.append('llm_role', transcribeOptions.llm_role)
+  }
+  if (transcribeOptions.target_backend) {
+    formData.append('target_backend', transcribeOptions.target_backend)
+  }
+  if (transcribeOptions.hotwords) {
+    formData.append('hotwords', transcribeOptions.hotwords)
+  }
+
+  // Per-request ASR tuning (backend validates allowlisted options).
+  let asrOptions: Record<string, unknown> = parseAsrOptionsText(asrOptionsText)
+  if (transcribeOptions.with_speaker) {
+    asrOptions = mergeSpeakerLabelStyle(asrOptions, transcribeOptions.speaker_label_style || 'numeric')
+  }
+  if (Object.keys(asrOptions).length > 0) {
+    formData.append('asr_options', JSON.stringify(asrOptions))
+  }
+
+  const response = await apiClient.post<FileTranscribeResponse>('/api/v1/trans/file', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    // Large meeting files can take a long time to upload; rely on network layer.
+    timeout: 0,
+    signal,
+    baseURL: overrides.baseURL,
+    onUploadProgress: onUploadProgress
+      ? (progressEvent) => {
+          const total = progressEvent.total || file.size
+          const progress = Math.round((progressEvent.loaded * 100) / total)
+          onUploadProgress(progress)
+        }
+      : undefined,
   })
   return response.data
 }

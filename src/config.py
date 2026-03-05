@@ -242,6 +242,12 @@ class Settings(BaseSettings):
     ws_heartbeat_interval: int = 30  # 心跳间隔 (秒)
     ws_heartbeat_timeout: int = 60  # 心跳超时 (秒)
 
+    # 异步任务队列（长音频/批量转写）
+    # - 对 3-4 小时会议长音频：单个任务可能跑很久，结果也可能较大
+    # - 前端刷新后仍希望能继续查询，因此默认保留更久
+    task_max_results: int = 200           # 最大缓存任务结果数
+    task_result_ttl_s: int = 24 * 3600    # 结果保留时间（秒）
+
     # 音频预处理配置
     audio_normalize_enable: bool = True          # 音量归一化
     audio_normalize_target_db: float = -20.0     # 目标电平 (dB)

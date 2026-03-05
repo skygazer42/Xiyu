@@ -564,6 +564,71 @@ PY
   fi
   rm -f "${tmp}" || true
 
+  # 文件转写（异步队列）：POST /api/v1/trans/file + 轮询 /api/v1/result
+  tmp="$(_tmpfile)"
+  code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/trans/file" \
+    -X POST \
+    -F "file=@${AUDIO}" \
+    -F "with_speaker=false" \
+    -F "apply_hotword=true" \
+    -F "apply_llm=false" \
+    -F "target_backend=auto" \
+  )"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1; then
+    task_id="$(python3 - "${tmp}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+data=obj.get("data") or {}
+tid=data.get("task_id") if isinstance(data, dict) else None
+print(tid or "")
+PY
+)"
+    if [ -n "${task_id}" ]; then
+      _ok "${base} POST /api/v1/trans/file"
+    else
+      _print_body_head "${tmp}"
+      _fail "${base} POST /api/v1/trans/file (missing task_id)"
+    fi
+  else
+    echo "ERROR HTTP ${code}: ${base}/api/v1/trans/file" >&2
+    _print_body_head "${tmp}"
+    _fail "${base} POST /api/v1/trans/file"
+    task_id=""
+  fi
+  rm -f "${tmp}" || true
+
+  if [ -n "${task_id}" ]; then
+    for i in $(seq 1 "${URL_TASK_POLL_RETRIES}"); do
+      tmp="$(_tmpfile)"
+      code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/result" \
+        -X POST \
+        -F "task_id=${task_id}" \
+        -F "delete=false" \
+      )"
+      if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1; then
+        status="$(python3 - "${tmp}" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1],encoding="utf-8"))
+print(obj.get("status") or "")
+PY
+)"
+        if [ "${status}" = "success" ]; then
+          _ok "${base} POST /api/v1/result (file task success)"
+          rm -f "${tmp}" || true
+          break
+        fi
+        if [ "${status}" = "error" ]; then
+          _print_body_head "${tmp}"
+          _fail "${base} POST /api/v1/result (file task error)"
+          rm -f "${tmp}" || true
+          break
+        fi
+      fi
+      rm -f "${tmp}" || true
+      sleep "${URL_TASK_POLL_SLEEP_S}"
+    done
+  fi
+
   # URL 转写（异步）— 默认跳过，除非提供 URL_AUDIO_URL
   if [ -n "${URL_AUDIO_URL}" ]; then
     tmp="$(_tmpfile)"

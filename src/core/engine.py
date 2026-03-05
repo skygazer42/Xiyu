@@ -2226,6 +2226,7 @@ class TranscriptionEngine:
         hotwords: Optional[str] = None,
         asr_options: Optional[Dict[str, Any]] = None,
         max_workers: int = 2,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
         sample_rate: int = 16000,
         **kwargs
     ) -> Dict[str, Any]:
@@ -2418,8 +2419,20 @@ class TranscriptionEngine:
             }
 
         # 并行处理分块
+        def _on_chunk_progress(done: int, total: int, _res: Dict[str, Any]) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(int(done), int(total))
+            except Exception:
+                # Progress reporting should never break transcription.
+                return
+
         chunk_results = chunker.process_parallel(
-            chunks, transcribe_chunk, max_workers=max_workers
+            chunks,
+            transcribe_chunk,
+            max_workers=max_workers,
+            on_progress=_on_chunk_progress if progress_callback is not None else None,
         )
 
         # Optional boundary reconciliation (accuracy-first, slower):

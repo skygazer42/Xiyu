@@ -26,6 +26,7 @@ export interface Task {
   result?: TranscribeResponse
   error?: string
   progress?: number
+  detail?: string
 }
 
 export interface TaskManagerProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -196,6 +197,9 @@ function TaskManager({
                   <p className="text-xs text-red-500 mt-0.5 truncate">
                     {task.error}
                   </p>
+                )}
+                {!task.error && task.detail && (task.status === "pending" || task.status === "processing") && (
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{task.detail}</p>
                 )}
               </div>
 

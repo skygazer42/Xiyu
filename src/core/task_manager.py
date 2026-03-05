@@ -32,6 +32,8 @@ class TaskResult:
     completed_at: Optional[datetime] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    progress: Optional[int] = None
+    message: Optional[str] = None
 
 
 @dataclass
@@ -91,10 +93,14 @@ class TaskManager:
             任务 ID
         """
         task_id = uuid.uuid4().hex
+        # Inject task_id into payload so handlers can update progress without
+        # needing a custom handler signature.
+        payload_with_meta = dict(payload or {})
+        payload_with_meta["_task_id"] = task_id
         task = TaskItem(
             task_id=task_id,
             task_type=task_type,
-            payload=payload
+            payload=payload_with_meta,
         )
 
         # 初始化结果
@@ -102,7 +108,9 @@ class TaskManager:
             self._results[task_id] = TaskResult(
                 task_id=task_id,
                 status=TaskStatus.PENDING,
-                created_at=task.created_at
+                created_at=task.created_at,
+                progress=0,
+                message="等待中",
             )
 
         self._queue.put(task)
@@ -130,6 +138,29 @@ class TaskManager:
         """获取任务状态"""
         result = self.get_result(task_id, delete=False)
         return result.status if result else None
+
+    def update_progress(self, task_id: str, *, progress: Optional[int] = None, message: Optional[str] = None) -> None:
+        """Update a task's progress/message (best-effort).
+
+        Args:
+            task_id: Task id
+            progress: 0-100 (optional)
+            message: short stage message (optional)
+        """
+        with self._lock:
+            if task_id not in self._results:
+                return
+            r = self._results[task_id]
+            if progress is not None:
+                try:
+                    p = int(progress)
+                except (TypeError, ValueError):
+                    p = None
+                if p is not None:
+                    r.progress = max(0, min(100, p))
+            if message is not None:
+                s = str(message).strip()
+                r.message = s if s else None
 
     def start(self):
         """启动任务处理器"""
@@ -173,6 +204,8 @@ class TaskManager:
         with self._lock:
             if task_id in self._results:
                 self._results[task_id].status = TaskStatus.PROCESSING
+                self._results[task_id].progress = self._results[task_id].progress or 0
+                self._results[task_id].message = self._results[task_id].message or "处理中"
 
         try:
             handler = self._handlers.get(task.task_type)
@@ -187,6 +220,8 @@ class TaskManager:
                     self._results[task_id].status = TaskStatus.COMPLETED
                     self._results[task_id].completed_at = datetime.now()
                     self._results[task_id].result = result
+                    self._results[task_id].progress = 100
+                    self._results[task_id].message = "已完成"
 
             logger.info(f"Task completed: {task_id}")
 
@@ -197,6 +232,7 @@ class TaskManager:
                     self._results[task_id].status = TaskStatus.FAILED
                     self._results[task_id].completed_at = datetime.now()
                     self._results[task_id].error = str(e)
+                    self._results[task_id].message = "失败"
 
     def _cleanup_old_results(self):
         """清理过期结果"""
@@ -222,4 +258,14 @@ class TaskManager:
 
 
 # 全局任务管理器
-task_manager = TaskManager()
+# Use settings-driven defaults to better support long meeting transcriptions (hours).
+try:
+    from src.config import settings
+
+    _max_results = int(getattr(settings, "task_max_results", 1000) or 1000)
+    _ttl_s = int(getattr(settings, "task_result_ttl_s", 3600) or 3600)
+except Exception:
+    _max_results = 1000
+    _ttl_s = 3600
+
+task_manager = TaskManager(max_results=_max_results, result_ttl=_ttl_s)

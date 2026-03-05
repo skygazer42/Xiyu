@@ -5,8 +5,8 @@
 
 import logging
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
-from concurrent.futures import ThreadPoolExecutor
+from typing import List, Tuple, Optional, Dict, Any, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import asyncio
 
 from src.core.text_processor.text_merge import merge_by_text
@@ -246,6 +246,7 @@ class AudioChunker:
         chunks: List[Tuple[np.ndarray, int, int]],
         transcribe_func,
         max_workers: int = 2,
+        on_progress: Optional[Callable[[int, int, Dict[str, Any]], None]] = None,
     ) -> List[Dict[str, Any]]:
         """并行处理分块
 
@@ -276,10 +277,29 @@ class AudioChunker:
                     "error": str(e),
                 }
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(process_chunk, chunks))
+        total = len(chunks)
+        results: List[Optional[Dict[str, Any]]] = [None] * total
+        done = 0
 
-        return results
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(process_chunk, chunk): idx
+                for idx, chunk in enumerate(chunks)
+            }
+
+            for future in as_completed(futures):
+                idx = futures[future]
+                res = future.result()
+                results[idx] = res
+                done += 1
+                if on_progress is not None:
+                    try:
+                        on_progress(done, total, res)
+                    except Exception as e:
+                        logger.debug(f"Chunk progress callback failed (ignored): {e}")
+
+        # All futures completed; `results` should be fully populated.
+        return [r for r in results if r is not None]
 
     async def process_parallel_async(
         self,

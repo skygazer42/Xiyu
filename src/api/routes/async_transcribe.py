@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+import aiofiles
 import httpx
 import ffmpeg
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -91,6 +92,17 @@ def extract_audio_from_video(video_path: str, audio_path: str) -> bool:
         raise
 
 
+async def _save_upload_file(upload: UploadFile, dest_path: Path, *, chunk_size: int = 1024 * 1024) -> None:
+    """Save an UploadFile to disk in chunks (avoid reading the whole file into memory)."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(dest_path, "wb") as out:
+        while True:
+            chunk = await upload.read(chunk_size)
+            if not chunk:
+                break
+            await out.write(chunk)
+
+
 def _handle_url_transcribe(payload: dict) -> dict:
     """
     处理 URL 转写任务
@@ -101,6 +113,7 @@ def _handle_url_transcribe(payload: dict) -> dict:
     Returns:
         转写结果
     """
+    task_id = payload.get("_task_id")
     url = payload["url"]
     with_speaker = payload.get("with_speaker", False)
     apply_hotword = payload.get("apply_hotword", True)
@@ -120,6 +133,8 @@ def _handle_url_transcribe(payload: dict) -> dict:
 
     try:
         # 下载文件
+        if task_id:
+            task_manager.update_progress(task_id, progress=5, message="下载中")
         logger.info(f"Downloading audio from: {url}")
         with httpx.Client(timeout=60.0) as client:
             response = client.get(url, follow_redirects=True)
@@ -132,6 +147,8 @@ def _handle_url_transcribe(payload: dict) -> dict:
             temp_download.close()
 
         # 转换格式
+        if task_id:
+            task_manager.update_progress(task_id, progress=10, message="转换音频")
         temp_wav = tempfile.NamedTemporaryFile(
             delete=False, suffix=".wav", dir=str(settings.uploads_dir)
         )
@@ -140,10 +157,25 @@ def _handle_url_transcribe(payload: dict) -> dict:
         convert_audio_to_pcm(temp_download.name, temp_wav.name)
 
         # 读取转换后的音频
+        if task_id:
+            task_manager.update_progress(task_id, progress=15, message="读取音频")
         with open(temp_wav.name, "rb") as f:
             audio_bytes = f.read()
 
         # 执行转写
+        if task_id:
+            task_manager.update_progress(task_id, progress=20, message="识别中")
+
+        def _progress(done: int, total: int) -> None:
+            if not task_id:
+                return
+            if total <= 0:
+                return
+            # Map chunk progress into 20..95 range.
+            pct = 20 + int(float(done) / float(total) * 75.0)
+            msg = f"分块转写 {done}/{total}"
+            task_manager.update_progress(task_id, progress=pct, message=msg)
+
         result = transcription_engine.transcribe_long_audio(
             audio_bytes,
             with_speaker=with_speaker,
@@ -153,10 +185,14 @@ def _handle_url_transcribe(payload: dict) -> dict:
             hotwords=hotwords,
             asr_options=asr_options,
             target_backend=target_backend,
+            max_workers=1,
+            progress_callback=_progress if task_id else None,
         )
 
         # Keep the async URL task result schema consistent with the synchronous HTTP
         # `/api/v1/transcribe` endpoint so the frontend can reuse Timeline/Exports.
+        if task_id:
+            task_manager.update_progress(task_id, progress=98, message="整理输出")
         return {
             "code": 0,
             "text": result.get("text", ""),
@@ -177,6 +213,94 @@ def _handle_url_transcribe(payload: dict) -> dict:
 
 # 注册任务处理器
 task_manager.register_handler("url_transcribe", _handle_url_transcribe)
+
+
+def _handle_file_transcribe(payload: dict) -> dict:
+    """Handle a long-audio file transcription task.
+
+    Payload fields:
+      - path: str (uploaded file path on disk)
+      - filename: str (original filename, optional)
+      - with_speaker/apply_hotword/apply_llm/llm_role/hotwords/asr_options/target_backend
+    """
+    task_id = payload.get("_task_id")
+    input_path = payload.get("path")
+    if not input_path:
+        raise ValueError("missing payload.path")
+
+    with_speaker = payload.get("with_speaker", False)
+    apply_hotword = payload.get("apply_hotword", True)
+    apply_llm = payload.get("apply_llm", False)
+    llm_role = payload.get("llm_role", "default")
+    hotwords = payload.get("hotwords")
+    target_backend = payload.get("target_backend")
+    asr_options = payload.get("asr_options")
+
+    temp_wav = None
+    try:
+        if task_id:
+            task_manager.update_progress(task_id, progress=10, message="转换音频")
+        temp_wav = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".wav", dir=str(settings.uploads_dir)
+        )
+        temp_wav.close()
+        convert_audio_to_pcm(str(input_path), temp_wav.name)
+
+        if task_id:
+            task_manager.update_progress(task_id, progress=15, message="读取音频")
+        audio_bytes = Path(temp_wav.name).read_bytes()
+
+        if task_id:
+            task_manager.update_progress(task_id, progress=20, message="识别中")
+
+        def _progress(done: int, total: int) -> None:
+            if not task_id:
+                return
+            if total <= 0:
+                return
+            pct = 20 + int(float(done) / float(total) * 75.0)
+            msg = f"分块转写 {done}/{total}"
+            task_manager.update_progress(task_id, progress=pct, message=msg)
+
+        result = transcription_engine.transcribe_long_audio(
+            audio_bytes,
+            with_speaker=with_speaker,
+            apply_hotword=apply_hotword,
+            apply_llm=apply_llm,
+            llm_role=str(llm_role) if llm_role else "default",
+            hotwords=hotwords,
+            asr_options=asr_options,
+            target_backend=target_backend,
+            max_workers=1,
+            progress_callback=_progress if task_id else None,
+        )
+
+        if task_id:
+            task_manager.update_progress(task_id, progress=98, message="整理输出")
+        return {
+            "code": 0,
+            "text": result.get("text", ""),
+            "text_accu": result.get("text_accu"),
+            "sentences": result.get("sentences", []),
+            "speaker_turns": result.get("speaker_turns"),
+            "transcript": result.get("transcript"),
+            "raw_text": result.get("raw_text", ""),
+        }
+    finally:
+        # Always cleanup temp files to avoid filling disk on long meetings.
+        try:
+            if input_path and os.path.exists(str(input_path)):
+                os.unlink(str(input_path))
+        except Exception:
+            pass
+        try:
+            if temp_wav and os.path.exists(temp_wav.name):
+                os.unlink(temp_wav.name)
+        except Exception:
+            pass
+
+
+task_manager.register_handler("file_transcribe", _handle_file_transcribe)
 
 
 @router.post("/trans/url")
@@ -224,6 +348,63 @@ async def transcribe_from_url(
     }
 
 
+@router.post("/trans/file")
+async def transcribe_from_file(
+    file: UploadFile = File(..., description="音频/视频文件"),
+    with_speaker: bool = Form(default=False, description="是否识别说话人"),
+    apply_hotword: bool = Form(default=True, description="是否应用热词纠错"),
+    apply_llm: bool = Form(default=False, description="是否应用 LLM 润色"),
+    llm_role: str = Form(default="default", description="LLM 角色"),
+    target_backend: Optional[str] = Form(
+        default=None,
+        description="Router 目标后端（单端口部署专用）：auto/qwen3/vibevoice/pytorch/onnx/sensevoice/gguf/whisper...",
+    ),
+    hotwords: Optional[str] = Form(default=None, description="临时热词"),
+    asr_options: Optional[str] = Form(default=None, description="ASR options JSON (per-request tuning)"),
+):
+    """上传文件转写（异步，适合 3-4 小时会议长音频）。
+
+    提交任务后返回 task_id，通过 /result 接口轮询获取结果。
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="请上传音频文件")
+
+    parsed_asr_options = None
+    try:
+        parsed_asr_options = parse_asr_options(asr_options)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    suffix = Path(file.filename).suffix if file.filename else ".wav"
+    dest = settings.uploads_dir / f"upload_{os.urandom(8).hex()}{suffix}"
+    try:
+        await _save_upload_file(file, dest)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存上传文件失败: {e}")
+
+    task_id = task_manager.submit(
+        "file_transcribe",
+        {
+            "path": str(dest),
+            "filename": file.filename,
+            "with_speaker": with_speaker,
+            "apply_hotword": apply_hotword,
+            "apply_llm": apply_llm,
+            "llm_role": llm_role,
+            "hotwords": hotwords,
+            "target_backend": target_backend,
+            "asr_options": parsed_asr_options,
+        },
+    )
+
+    return {
+        "code": 200,
+        "status": "success",
+        "message": "任务已提交",
+        "data": {"task_id": task_id},
+    }
+
+
 @router.post("/result")
 async def get_task_result(
     task_id: str = Form(..., description="任务 ID"),
@@ -251,7 +432,11 @@ async def get_task_result(
             "code": 202,
             "status": "pending",
             "message": "任务等待中",
-            "data": {"task_id": task_id}
+            "data": {
+                "task_id": task_id,
+                "progress": getattr(result, "progress", None),
+                "detail": getattr(result, "message", None),
+            },
         }
 
     if result.status == TaskStatus.PROCESSING:
@@ -259,7 +444,11 @@ async def get_task_result(
             "code": 202,
             "status": "processing",
             "message": "任务处理中",
-            "data": {"task_id": task_id}
+            "data": {
+                "task_id": task_id,
+                "progress": getattr(result, "progress", None),
+                "detail": getattr(result, "message", None),
+            },
         }
 
     if result.status == TaskStatus.FAILED:
