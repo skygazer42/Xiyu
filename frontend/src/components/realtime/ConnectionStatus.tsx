@@ -66,17 +66,6 @@ function getSignalStrength(latency: number): "low" | "medium" | "high" {
   return "high"
 }
 
-function getSignalIcon(strength: "low" | "medium" | "high") {
-  switch (strength) {
-    case "low":
-      return SignalLow
-    case "medium":
-      return SignalMedium
-    case "high":
-      return SignalHigh
-  }
-}
-
 function ConnectionStatusComponent({
   className,
   status,
@@ -90,8 +79,14 @@ function ConnectionStatusComponent({
   const StatusIcon = config.icon
   const isAnimating = status === "connecting" || status === "reconnecting"
 
-  const signalStrength = latency ? getSignalStrength(latency) : null
-  const SignalIcon = signalStrength ? getSignalIcon(signalStrength) : Signal
+  const signalStrength =
+    latency !== null && latency !== undefined ? getSignalStrength(latency) : null
+  const signalIconClassName = cn(
+    "h-4 w-4",
+    signalStrength === "high" && "text-green-500",
+    signalStrength === "medium" && "text-yellow-500",
+    signalStrength === "low" && "text-red-500"
+  )
 
   if (compact) {
     return (
@@ -150,14 +145,15 @@ function ConnectionStatusComponent({
       {/* 网络质量 */}
       {latency !== null && latency !== undefined && status === "connected" && (
         <div className="flex items-center gap-2 text-sm">
-          <SignalIcon
-            className={cn(
-              "h-4 w-4",
-              signalStrength === "high" && "text-green-500",
-              signalStrength === "medium" && "text-yellow-500",
-              signalStrength === "low" && "text-red-500"
-            )}
-          />
+          {signalStrength === "high" ? (
+            <SignalHigh className={signalIconClassName} />
+          ) : signalStrength === "medium" ? (
+            <SignalMedium className={signalIconClassName} />
+          ) : signalStrength === "low" ? (
+            <SignalLow className={signalIconClassName} />
+          ) : (
+            <Signal className={signalIconClassName} />
+          )}
           <span className="tabular-nums">{latency}ms</span>
         </div>
       )}

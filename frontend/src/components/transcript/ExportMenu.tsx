@@ -249,5 +249,5 @@ function escapeHtml(text: string): string {
 }
 
 function escapeMarkdownInline(text: string): string {
-  return String(text).replaceAll(/([\\`*_{}\[\]()#+\-.!|>])/g, '\\$1')
+  return String(text).replaceAll(/([\\`*_{}[\]()#+\-.!|>\]])/g, '\\$1')
 }

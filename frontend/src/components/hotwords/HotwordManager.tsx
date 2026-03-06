@@ -98,6 +98,7 @@ function HotwordManager({
   const [selectedWords, setSelectedWords] = React.useState<Set<string>>(new Set())
   const [newWord, setNewWord] = React.useState('')
   const [duplicates, setDuplicates] = React.useState<string[]>([])
+  const controlsDisabled = isLoading
 
   // 解析热词为分组
   React.useEffect(() => {
@@ -255,12 +256,16 @@ function HotwordManager({
             热词管理 ({totalCount})
           </CardTitle>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleExport}>
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={controlsDisabled}>
               <Download className="h-4 w-4 mr-1" />
               导出
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <label className="cursor-pointer">
+              <label
+                className={cn(
+                  controlsDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                )}
+              >
                 <Upload className="h-4 w-4 mr-1" />
                 导入
                 <input
@@ -268,6 +273,7 @@ function HotwordManager({
                   accept=".txt"
                   className="hidden"
                   onChange={handleImport}
+                  disabled={controlsDisabled}
                 />
               </label>
             </Button>
@@ -284,6 +290,7 @@ function HotwordManager({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
+            disabled={controlsDisabled}
           />
         </div>
 
@@ -299,8 +306,9 @@ function HotwordManager({
                   handleAddWord()
                 }
               }}
+              disabled={controlsDisabled}
             />
-            <Button onClick={handleAddWord} disabled={!newWord.trim()}>
+            <Button onClick={handleAddWord} disabled={controlsDisabled || !newWord.trim()}>
               <Plus className="h-4 w-4 mr-1" />
               添加
             </Button>
@@ -322,6 +330,7 @@ function HotwordManager({
               <Checkbox
                 checked={selectedWords.size === totalCount}
                 onCheckedChange={handleSelectAll}
+                disabled={controlsDisabled}
               />
               <span className="text-sm">已选 {selectedWords.size} 个</span>
             </div>
@@ -329,6 +338,7 @@ function HotwordManager({
               variant="destructive"
               size="sm"
               onClick={handleDeleteSelected}
+              disabled={controlsDisabled}
             >
               <Trash2 className="h-4 w-4 mr-1" />
               删除选中
@@ -372,6 +382,7 @@ function HotwordManager({
                           onCheckedChange={(checked) =>
                             handleSelectWord(word, checked === true)
                           }
+                          disabled={controlsDisabled}
                         />
                       )}
                       <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
@@ -391,6 +402,7 @@ function HotwordManager({
                           size="icon"
                           className="h-7 w-7 opacity-0 group-hover:opacity-100"
                           onClick={() => handleDeleteWord(groupIndex, wordIndex)}
+                          disabled={controlsDisabled}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>

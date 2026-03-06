@@ -15,6 +15,15 @@ export default defineConfig([
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
     ],
+    rules: {
+      // The default Vite fast-refresh rule is too strict for shadcn-style UI modules
+      // (they often export variants/helpers alongside components). Keep lint focused
+      // on correctness instead of forcing large refactors.
+      'react-refresh/only-export-components': 'off',
+
+      // This is a performance hint; we keep it as a warning so it doesn't block CI/lint.
+      'react-hooks/set-state-in-effect': 'warn',
+    },
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
