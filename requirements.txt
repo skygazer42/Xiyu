@@ -26,13 +26,16 @@ scipy<1.15
 noisereduce>=3.0.0
 
 # ClearVoice (ClearerVoice-Studio) denoise (optional)
-# - Enabled via `asr_options.preprocess.denoise_backend=clearvoice_frcrn`
+# - Enabled via `asr_options.preprocess.denoise_backend=clearvoice`
 # - Requires a local ClearerVoice-Studio checkout or `pip install clearvoice`
 yamlargparse>=1.31.1
 tqdm>=4.66.0
 pydub>=0.25.1
 huggingface-hub>=0.26.2
 pyyaml>=6.0.1
+einops
+rotary_embedding_torch==0.8.3
+torchinfo
 
 # Hot word optimization (from CapsWriter)
 pypinyin>=0.50.0
