@@ -12,6 +12,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/config", tags=["config"])
 
+_SENSITIVE_SUFFIXES = ("_api_key", "_access_token", "_refresh_token", "_secret", "_password")
+_SENSITIVE_KEYS = {
+    "api_key",
+    "access_token",
+    "refresh_token",
+    "secret",
+    "password",
+    "hf_token",
+}
+
+
+def _is_sensitive_key(key: str) -> bool:
+    k = str(key or "").strip().lower()
+    if not k:
+        return False
+    if k in _SENSITIVE_KEYS:
+        return True
+    return any(k.endswith(suf) for suf in _SENSITIVE_SUFFIXES)
+
+
+def _redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact secrets from a settings dict before returning it to clients."""
+    out: Dict[str, Any] = {}
+    for k, v in (config or {}).items():
+        if _is_sensitive_key(k):
+            # Preserve emptiness vs. set-ness for debugging, but never leak the value.
+            out[k] = "<redacted>" if v not in (None, "", False) else v
+        else:
+            out[k] = v
+    return out
+
 
 class ConfigUpdateRequest(BaseModel):
     """配置更新请求"""
@@ -94,7 +125,7 @@ async def get_all_config():
     """
     # Avoid iterating over `dir(settings)`, which includes many Pydantic internals
     # (e.g. `model_fields`) that are not JSON-serializable and can crash this endpoint.
-    config = settings.model_dump(mode="json")
+    config = _redact_config(settings.model_dump(mode="json"))
 
     # Expose helpful computed properties explicitly.
     config["speaker_unsupported_behavior_effective"] = settings.speaker_unsupported_behavior_effective

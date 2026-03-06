@@ -340,7 +340,14 @@ class AudioPreprocessor:
         gain = self.target_rms / current_rms
 
         # 应用增益，限制最大增益避免过度放大噪声
-        max_gain = 10.0  # 最大 20dB 增益
+        # NOTE: ClearVoice enhancement can significantly attenuate the waveform
+        # (esp. on some meeting recordings). Allow a higher ceiling in that case
+        # so downstream VAD/ASR doesn't treat the result as silence.
+        denoise_backend = str(getattr(self, "denoise_backend", "") or "").strip().lower()
+        if denoise_backend.startswith("clearvoice"):
+            max_gain = 100.0  # up to +40dB (will still be clipped-safe below)
+        else:
+            max_gain = 10.0  # 最大 20dB 增益
         gain = min(gain, max_gain)
 
         # 归一化
@@ -349,7 +356,17 @@ class AudioPreprocessor:
         # 防止削波
         max_val = np.max(np.abs(normalized))
         if max_val > 0.99:
-            normalized = normalized * (0.99 / max_val)
+            # For ClearVoice-enhanced audio we often see a few sharp spikes after
+            # denoise; scaling the whole waveform down would make speech too quiet
+            # and hurt VAD. Prefer a soft limiter in that case.
+            if denoise_backend.startswith("clearvoice"):
+                normalized = self._soft_limit_tanh(
+                    normalized.astype(np.float32, copy=False),
+                    target=0.99,
+                    knee=2.0,
+                )
+            else:
+                normalized = normalized * (0.99 / max_val)
 
         return normalized.astype(audio.dtype)
 
