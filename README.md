@@ -569,6 +569,7 @@ curl -X POST "http://localhost:8101/api/v1/transcribe" \
   - 设置 `CLEARVOICE_FORCE_CPU=false`
   - 并给 clearvoice 服务设置 `CLEARVOICE_DEVICE=cuda`、`CLEARVOICE_NGPU=1`（或按需调整）
   - 可用 `curl http://localhost:8400/info` 查看 clearvoice 服务是否识别到 CUDA
+  - 单卡多模型更稳组合（Qwen3 + Whisper + ClearVoice GPU）：建议把 `QWEN3_GPU_MEMORY_UTILIZATION` 调低到 `0.45` 左右，并把 `DIARIZER_DEVICE=cpu`（以及可选把 `PYTORCH_DEVICE/SENSEVOICE_DEVICE=cpu`）以留出峰值显存（否则容易 ClearVoice OOM）
 - 不启用微服务也可以：让 `CLEARVOICE_SERVICE_BASE_URL=` 置空，然后在 ASR 容器内 `pip install clearvoice` 或挂载本地 `ClearerVoice-Studio/clearvoice` 并设置 `CLEARVOICE_STUDIO_DIR`（本仓库 compose 已默认尝试按同路径挂载）。
 - 前端 UI 里也有「ClearVoice 降噪」开关，会自动在单次请求里写入同样的 `asr_options.preprocess`。
 

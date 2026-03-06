@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CircularProgressIndeterminate } from '@/components/ui/circular-progress'
-import { Loader2, Play, FileAudio, Link } from 'lucide-react'
+import { Loader2, Play, FileAudio, Link, Download } from 'lucide-react'
 import { FileDropzone } from '@/components/upload'
 import { TranscribeOptions } from '@/components/transcribe'
 import { EnsemblePanel, TranscriptView } from '@/components/transcript'
@@ -22,6 +22,7 @@ import {
   transcribeAudio,
   transcribeAllModels,
   transcribeBatch,
+  enhanceAudio,
   transcribeFileAsync,
   transcribeUrl,
 } from '@/lib/api'
@@ -37,6 +38,17 @@ type AsyncTranscribeTask = Task & {
 const URL_TASK_MAX_POLL_MS = 10 * 60 * 1000
 const FILE_TASK_MAX_POLL_MS = 24 * 60 * 60 * 1000
 const TASKS_STORAGE_KEY = 'xiyu_async_tasks_v1'
+
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 function buildMergedAsrOptionsText(
   advancedText: string,
@@ -117,6 +129,7 @@ export default function TranscribePage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [transcribePhase, setTranscribePhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
   const [elapsedMs, setElapsedMs] = useState(0)
+  const [isEnhancing, setIsEnhancing] = useState(false)
 
   const ensembleQuickMode = useMemo(() => {
     if (!ensembleOptions.apply_llm) {
@@ -380,6 +393,41 @@ export default function TranscribePage() {
       // ignore quota errors
     }
   }, [asyncTasks])
+
+  const handleDownloadEnhancedAudio = async () => {
+    if (files.length === 0) {
+      toast.error('请先上传音频文件')
+      return
+    }
+    if (files.length !== 1) {
+      toast.error('降噪下载目前仅支持单文件')
+      return
+    }
+    if (!preprocess.clearvoice_denoise_enable) {
+      toast.error('请先开启 ClearVoice 降噪')
+      return
+    }
+    if (advancedAsrOptionsError) {
+      toast.error(`高级 asr_options JSON 无效：${advancedAsrOptionsError}`)
+      return
+    }
+
+    setIsEnhancing(true)
+    try {
+      const blob = await enhanceAudio(files[0], {
+        asrOptionsText: mergedAsrOptionsText,
+      })
+      const stem = files[0].name.replace(/\.[^/.]+$/, '') || 'audio'
+      downloadBlob(`${stem}.denoised.wav`, blob)
+      toast.success('已下载降噪音频')
+    } catch (error) {
+      console.error('Enhance audio error:', error)
+      const appError = fromAxiosError(error)
+      toast.error(getUserFriendlyMessage(appError))
+    } finally {
+      setIsEnhancing(false)
+    }
+  }
 
   const handleTranscribe = async () => {
     if (files.length === 0) {
@@ -918,6 +966,24 @@ export default function TranscribePage() {
 	                      <SelectItem value="policy_meeting_aggressive">激进（尽量纠错）</SelectItem>
 	                    </SelectContent>
 	                  </Select>
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadEnhancedAudio}
+                    disabled={files.length !== 1 || isTranscribing || isEnhancing || !preprocess.clearvoice_denoise_enable}
+                    title="使用当前预处理配置（如 ClearVoice）生成增强后的 WAV 并下载"
+                  >
+                    {isEnhancing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        处理中...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        降噪音频
+                      </>
+                    )}
+                  </Button>
                   {isTranscribing && (
                     <Button variant="outline" onClick={handleCancel} title="取消当前请求（不会影响服务端已在跑的推理）">
                       取消

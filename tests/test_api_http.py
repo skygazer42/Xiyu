@@ -56,6 +56,25 @@ def test_backend_info_endpoint(client):
 
     assert data["speaker_unsupported_behavior"] in {"error", "fallback", "ignore"}
 
+def test_preprocess_enhance_endpoint_returns_wav(client):
+    with patch("src.api.routes.preprocess.process_audio_file") as mock_process:
+        async def fake_process(file, preprocess_options=None):
+            assert preprocess_options == {"denoise_enable": True, "denoise_backend": "clearvoice"}
+            # 1s PCM16LE @ 16kHz mono (2 bytes/sample)
+            yield b"\x00" * (16000 * 2)
+
+        mock_process.side_effect = fake_process
+
+        files = {"file": ("meeting.m4a", io.BytesIO(b"fake"), "audio/m4a")}
+        data = {"asr_options": '{"preprocess":{"denoise_enable":true,"denoise_backend":"clearvoice"}}'}
+        resp = client.post("/api/v1/preprocess/enhance", files=files, data=data)
+
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type", "").startswith("audio/wav")
+        assert ".enhanced.wav" in resp.headers.get("content-disposition", "")
+        assert resp.content[:4] == b"RIFF"
+        assert b"WAVE" in resp.content[:64]
+
 def test_transcribe_endpoint(client):
     """测试转写接口"""
     # Route uses `await transcription_engine.transcribe_auto_async(...)`, so patch that

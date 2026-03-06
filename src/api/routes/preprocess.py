@@ -13,9 +13,13 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form
+from fastapi.responses import Response
 
 from src.config import settings
+from src.api.dependencies import process_audio_file
+from src.api.asr_options import parse_asr_options
+from src.models.backends.remote_utils import pcm16le_to_wav_bytes
 
 router = APIRouter(prefix="/api/v1", tags=["preprocess"])
 
@@ -112,3 +116,52 @@ async def get_preprocess_status() -> Dict[str, Any]:
             "noisereduce": {"available": bool(noisereduce_ok), "error": noisereduce_err},
         },
     }
+
+
+@router.post("/preprocess/enhance")
+async def preprocess_enhance(
+    file: UploadFile = File(..., description="音频文件（任意 FFmpeg 支持的格式）"),
+    asr_options: Optional[str] = Form(default=None, description="ASR options JSON（仅使用 preprocess 段）"),
+) -> Response:
+    """对音频做预处理并返回增强后的 WAV（16kHz mono PCM16）。
+
+    典型用途：前端勾选 ClearVoice 降噪后下载“降噪后的音频”用于复核/归档。
+
+    注意：
+    - 该接口会解码并在内存中处理整段音频，适合“中短音频”。超长音频建议走异步链路。
+    - 处理逻辑与 `/api/v1/transcribe` 使用同一套 `process_audio_file()` 预处理。
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="请上传音频文件")
+
+    parsed_asr_options = None
+    try:
+        parsed_asr_options = parse_asr_options(asr_options)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    preprocess_options = (parsed_asr_options or {}).get("preprocess")
+
+    pcm16le_bytes: Optional[bytes] = None
+    async for audio_bytes in process_audio_file(file, preprocess_options=preprocess_options):
+        pcm16le_bytes = audio_bytes
+        break
+
+    if not pcm16le_bytes:
+        raise HTTPException(status_code=400, detail="音频文件为空或无法解码")
+
+    wav_bytes = pcm16le_to_wav_bytes(pcm16le_bytes)
+
+    try:
+        stem = Path(str(file.filename)).stem or "audio"
+    except Exception:
+        stem = "audio"
+    out_name = f"{stem}.enhanced.wav"
+
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={
+            "Content-Disposition": f'attachment; filename="{out_name}"',
+        },
+    )
