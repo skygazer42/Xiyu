@@ -30,6 +30,7 @@ from src.core.audio.clearvoice_denoise import (
     ClearVoiceNotAvailable,
     clearvoice_enhance,
 )
+from src.core.audio.clearvoice_utils import clearvoice_model_sample_rate, normalize_clearvoice_model_name
 from src.core.audio.pcm import float32_to_pcm16le_bytes, pcm16le_bytes_to_float32
 from src.models.backends.remote_utils import pcm16le_to_wav_bytes
 
@@ -84,10 +85,14 @@ def health() -> dict:
 
 @app.get("/info")
 def info() -> dict:
+    requested_model = str(getattr(settings, "clearvoice_model", "MossFormer2_48000Hz") or "MossFormer2_48000Hz")
+    effective_model = normalize_clearvoice_model_name(requested_model)
     payload = {
         "service": "clearvoice",
         "enabled": bool(getattr(settings, "clearvoice_enable", True)),
-        "model": str(getattr(settings, "clearvoice_model", "FRCRN_SE_16K") or "FRCRN_SE_16K"),
+        "model": requested_model,
+        "model_effective": effective_model,
+        "model_sample_rate": int(clearvoice_model_sample_rate(effective_model)),
         "force_cpu": bool(getattr(settings, "clearvoice_force_cpu", True)),
         "studio_dir": str(getattr(settings, "clearvoice_studio_dir", "") or ""),
         "device": str(getattr(settings, "device", "cpu") or "cpu"),

@@ -21,6 +21,11 @@ from typing import Optional
 import numpy as np
 
 from src.config import settings
+from src.core.audio.clearvoice_utils import (
+    clearvoice_model_sample_rate,
+    normalize_clearvoice_model_name,
+    resample_audio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,20 +63,20 @@ class ClearVoiceDenoiser:
         default. In our Docker deployment we mount a persistent directory at
         `/app/checkpoints`, so prefer it when present.
         """
-        name = str(model_name or "").strip() or "FRCRN_SE_16K"
+        name = normalize_clearvoice_model_name(str(model_name or "").strip() or "FRCRN_SE_16K")
         docker_dir = Path("/app/checkpoints")
         if docker_dir.exists() and docker_dir.is_dir():
             return docker_dir / name
         return Path("checkpoints") / name
 
-    def _ensure_checkpoints(self) -> None:
+    def _ensure_checkpoints(self, model_name: str) -> None:
         """Best-effort: ensure ClearVoice checkpoint files exist.
 
         The upstream ClearerVoice-Studio helper may leave a partial checkout when
         `git-lfs` is unavailable, which causes `last_best_checkpoint.pt` to be
         missing even though `last_best_checkpoint` exists.
         """
-        model_name = str(self._cfg.model or "").strip() or "FRCRN_SE_16K"
+        model_name = normalize_clearvoice_model_name(str(model_name or "").strip() or "FRCRN_SE_16K")
         ckpt_dir = self._resolve_checkpoint_dir(model_name)
         best_file = ckpt_dir / "last_best_checkpoint"
 
@@ -150,10 +155,12 @@ class ClearVoiceDenoiser:
                 raise ClearVoiceDisabled("ClearVoice is disabled (set CLEARVOICE_ENABLE=true).")
 
             # Ensure checkpoint files exist before ClearVoice tries to load them.
-            self._ensure_checkpoints()
+            requested_model = str(self._cfg.model or "").strip() or "FRCRN_SE_16K"
+            model_name = normalize_clearvoice_model_name(requested_model)
+            self._ensure_checkpoints(model_name)
 
             ClearVoice = self._import_clearvoice()
-            cv = ClearVoice(task="speech_enhancement", model_names=[str(self._cfg.model)])
+            cv = ClearVoice(task="speech_enhancement", model_names=[model_name])
 
             try:
                 model = cv.models[0]
@@ -192,8 +199,9 @@ class ClearVoiceDenoiser:
 
             self._speech_model = model
             logger.info(
-                "ClearVoice denoiser ready: model=%s force_cpu=%s studio_dir=%s",
-                self._cfg.model,
+                "ClearVoice denoiser ready: model=%s (requested=%s) force_cpu=%s studio_dir=%s",
+                model_name,
+                requested_model,
                 self._cfg.force_cpu,
                 self._cfg.studio_dir,
             )
@@ -204,13 +212,12 @@ class ClearVoiceDenoiser:
         if self._speech_model is None:
             return audio
 
-        if sample_rate != 16000:
-            # Current ClearVoice integration is only validated for 16k enhancement models.
-            logger.warning("ClearVoice denoise expects 16kHz audio; got %sHz, skipping", sample_rate)
-            return audio
-
         if audio.size == 0:
             return audio
+
+        model_name = normalize_clearvoice_model_name(str(self._cfg.model or "").strip() or "FRCRN_SE_16K")
+        model_sr = int(clearvoice_model_sample_rate(model_name))
+        in_sr = int(sample_rate)
 
         x = np.asarray(audio, dtype=np.float32).reshape(-1)
 
@@ -223,8 +230,8 @@ class ClearVoiceDenoiser:
         if overlap_duration_s >= chunk_duration_s:
             overlap_duration_s = min(0.5, max(0.0, chunk_duration_s / 4.0))
 
-        chunk_samples = int(chunk_duration_s * sample_rate)
-        overlap_samples = int(overlap_duration_s * sample_rate)
+        chunk_samples = int(chunk_duration_s * in_sr)
+        overlap_samples = int(overlap_duration_s * in_sr)
         if chunk_samples <= 0:
             chunk_samples = len(x)
         if overlap_samples < 0:
@@ -232,13 +239,44 @@ class ClearVoiceDenoiser:
         if overlap_samples >= chunk_samples:
             overlap_samples = 0
 
+        def _run_segment(seg: np.ndarray) -> np.ndarray:
+            """Run ClearVoice on a single segment and keep length stable."""
+            seg_in = np.asarray(seg, dtype=np.float32).reshape(-1)
+            if seg_in.size == 0:
+                return seg_in
+
+            # Resample to model SR if needed.
+            if in_sr != model_sr:
+                seg_model = resample_audio(seg_in, sr_from=in_sr, sr_to=model_sr)
+            else:
+                seg_model = seg_in
+
+            with _infer_lock:
+                out = self._speech_model.decode_data(seg_model.reshape(1, -1))
+
+            y_model = np.asarray(out, dtype=np.float32)
+            if y_model.ndim == 2:
+                y_model = y_model[0]
+
+            # Resample back to input SR if needed.
+            if in_sr != model_sr:
+                y = resample_audio(y_model, sr_from=model_sr, sr_to=in_sr)
+            else:
+                y = y_model
+
+            y = np.asarray(y, dtype=np.float32).reshape(-1)
+
+            # Keep length stable for downstream timestamp assumptions.
+            if y.size > seg_in.size:
+                y = y[: seg_in.size]
+            elif y.size < seg_in.size:
+                y = np.pad(y, (0, seg_in.size - y.size), mode="constant")
+
+            return y
+
         # Small audio: run once.
         if len(x) <= chunk_samples:
-            with _infer_lock:
-                out = self._speech_model.decode_data(x.reshape(1, -1))
-            y = np.asarray(out, dtype=np.float32)
-            if y.ndim == 2:
-                y = y[0]
+            y = _run_segment(x)
             return y[: len(x)]
 
         # Chunked enhancement with crossfade overlap.
@@ -255,7 +293,7 @@ class ClearVoiceDenoiser:
             end = min(pos + chunk_samples, len(x))
             seg = x[pos:end]
             # Pad very short tail chunks for STFT stability, then trim back.
-            min_len = max(1024, int(0.1 * sample_rate))
+            min_len = max(1024, int(0.1 * in_sr))
             if seg.size < min_len:
                 seg_in = np.pad(seg, (0, min_len - seg.size), mode="constant")
                 trim_len = seg.size
@@ -263,11 +301,7 @@ class ClearVoiceDenoiser:
                 seg_in = seg
                 trim_len = seg.size
 
-            with _infer_lock:
-                out = self._speech_model.decode_data(seg_in.reshape(1, -1))
-            seg_out = np.asarray(out, dtype=np.float32)
-            if seg_out.ndim == 2:
-                seg_out = seg_out[0]
+            seg_out = _run_segment(seg_in)
             seg_out = seg_out[:trim_len]
 
             if first or overlap_samples <= 0:

@@ -294,7 +294,7 @@ class Settings(BaseSettings):
     # ClearVoice (ClearerVoice-Studio) speech enhancement (optional)
     # ------------------------------------------------------------
     # Enable ClearVoice integration as a denoise backend: set per-request
-    # `asr_options.preprocess.denoise_backend=clearvoice_frcrn` (and denoise_enable=true).
+    # `asr_options.preprocess.denoise_backend=clearvoice` (and denoise_enable=true).
     #
     # Notes:
     # - ClearVoice is heavier than noisereduce/deepfilter; expect slower processing.
@@ -303,8 +303,10 @@ class Settings(BaseSettings):
     # If `clearvoice` is not installed, add this directory to `sys.path` and try importing
     # from the local ClearerVoice-Studio checkout (e.g. /data/ClearerVoice-Studio/clearvoice).
     clearvoice_studio_dir: str = "/data/ClearerVoice-Studio/clearvoice"
-    # Speech enhancement model name (16k): FRCRN_SE_16K / MossFormerGAN_SE_16K
-    clearvoice_model: str = "FRCRN_SE_16K"
+    # Speech enhancement model name:
+    # - 48k: MossFormer2_SE_48K  (alias supported: MossFormer2_48000Hz / mossformer2_48k)
+    # - 16k: FRCRN_SE_16K / MossFormerGAN_SE_16K
+    clearvoice_model: str = "MossFormer2_48000Hz"
     # Force ClearVoice to run on CPU even if CUDA is available (recommended for single-GPU ASR servers).
     clearvoice_force_cpu: bool = True
     # Long audio: process enhancement in chunks to avoid huge tensors.
