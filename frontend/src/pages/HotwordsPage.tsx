@@ -142,8 +142,8 @@ function HotwordsListEditor(props: { mode: 'forced' | 'context' }) {
           <Textarea
             placeholder={
               isContextMode
-                ? '输入上下文热词，每行一个...\n# 这是注释\nQwen3-ASR\nKubernetes'
-                : '输入强制热词，每行一个...\n# 这是注释\n麦当劳\n肯德基\nBilibili'
+                ? '输入上下文热词，每行一个...\n# 这是注释\n常州\n政企通\n我的常州\n高效办成一件事\n免申即享\n政务大模型'
+                : '输入强制热词，每行一个...\n# 这是注释\n政企通\n我的常州\n常州市数据局\n等保2.0\n一网通办'
             }
             value={editText}
             onChange={(e) => {

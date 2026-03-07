@@ -807,7 +807,7 @@ curl http://localhost:8000/api/v1/hotwords
 # 更新热词
 curl -X POST http://localhost:8000/api/v1/hotwords \
   -H "Content-Type: application/json" \
-  -d '{"hotwords": ["Claude", "FunASR", "麦当劳"]}'
+  -d '{"hotwords": ["政企通", "我的常州", "高效办成一件事"]}'
 
 # 追加热词
 curl -X POST http://localhost:8000/api/v1/hotwords/append \
