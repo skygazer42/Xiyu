@@ -11,6 +11,7 @@
 ## 文档导航
 
 - 部署（从 0 → 全部跑起来）：`docs/DEPLOYMENT.md`
+- Web 前端（访问地址 / 配置 / 使用）：`docs/WEB_UI.md`
 - 多模型 / 多后端（profiles / 端口 / 说话人策略）：`docs/MODELS.md`
 - 常见问题排障（GPU / 下载 / 端口 / 性能）：`docs/TROUBLESHOOTING.md`
 - API 参考：`docs/API.md`

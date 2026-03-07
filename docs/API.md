@@ -71,10 +71,10 @@ GET /
 
 说明：
 
-- **如果已构建前端**（存在 `frontend/dist`，例如 Docker 镜像内置前端），`GET /` 会返回 **Web UI (HTML)**。
-- **如果未构建前端**（只启动后端），`GET /` 会返回 **服务信息 JSON**。
+- `GET /` **默认返回服务信息 JSON**（便于脚本/健康探测）。
+- 当请求头 `Accept` 包含 `text/html`，且已构建前端（存在 `frontend/dist`，例如 Docker 镜像内置前端）时，`GET /` 会返回 **Web UI (HTML)**。
 
-如果你需要稳定的 JSON（不受前端构建状态影响），请使用：
+如果你需要稳定的 JSON（不受前端构建状态或浏览器 Accept 头影响），请使用：
 
 ```
 GET /service-info
