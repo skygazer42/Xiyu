@@ -32,6 +32,13 @@ def get_audio_preprocessor() -> AudioPreprocessor:
             device=settings.device,
             adaptive_enable=settings.audio_adaptive_preprocess,
             snr_threshold=settings.audio_snr_threshold,
+            highpass_enable=settings.audio_highpass_enable,
+            highpass_cutoff_hz=settings.audio_highpass_cutoff_hz,
+            lowpass_enable=settings.audio_lowpass_enable,
+            lowpass_cutoff_hz=settings.audio_lowpass_cutoff_hz,
+            bandpass_enable=settings.audio_bandpass_enable,
+            bandpass_low_hz=settings.audio_bandpass_low_hz,
+            bandpass_high_hz=settings.audio_bandpass_high_hz,
         )
     return _audio_preprocessor
 
@@ -64,8 +71,13 @@ def _build_request_preprocessor(preprocess_options: Optional[Dict[str, Any]]) ->
         # New per-request toggle (defaults to True to match current behavior).
         "remove_dc_offset": True,
         # Accuracy-first filters (disabled by default unless explicitly enabled).
-        "highpass_enable": False,
-        "highpass_cutoff_hz": 80.0,
+        "highpass_enable": bool(getattr(settings, "audio_highpass_enable", False)),
+        "highpass_cutoff_hz": float(getattr(settings, "audio_highpass_cutoff_hz", 80.0) or 80.0),
+        "lowpass_enable": bool(getattr(settings, "audio_lowpass_enable", False)),
+        "lowpass_cutoff_hz": float(getattr(settings, "audio_lowpass_cutoff_hz", 7600.0) or 7600.0),
+        "bandpass_enable": bool(getattr(settings, "audio_bandpass_enable", False)),
+        "bandpass_low_hz": float(getattr(settings, "audio_bandpass_low_hz", 300.0) or 300.0),
+        "bandpass_high_hz": float(getattr(settings, "audio_bandpass_high_hz", 3400.0) or 3400.0),
         "soft_limit_enable": False,
         "soft_limit_target": 0.98,
         "soft_limit_knee": 2.0,
@@ -108,6 +120,8 @@ async def process_audio_file(
             should_process = (
                 getattr(preprocessor, "remove_dc_offset", True)
                 or getattr(preprocessor, "highpass_enable", False)
+                or getattr(preprocessor, "lowpass_enable", False)
+                or getattr(preprocessor, "bandpass_enable", False)
                 or getattr(preprocessor, "soft_limit_enable", False)
                 or preprocessor.normalize_enable
                 or preprocessor.trim_silence_enable

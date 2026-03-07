@@ -321,6 +321,8 @@ async def transcribe_all_models_api(
             "adaptive_enable": False,
             "remove_dc_offset": False,
             "highpass_enable": False,
+            "lowpass_enable": False,
+            "bandpass_enable": False,
             "soft_limit_enable": False,
         }
 

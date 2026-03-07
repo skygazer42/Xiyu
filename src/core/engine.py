@@ -2347,8 +2347,13 @@ class TranscriptionEngine:
             "snr_threshold": settings.audio_snr_threshold,
             # Defaults match API layer behavior.
             "remove_dc_offset": True,
-            "highpass_enable": False,
-            "highpass_cutoff_hz": 80.0,
+            "highpass_enable": bool(getattr(settings, "audio_highpass_enable", False)),
+            "highpass_cutoff_hz": float(getattr(settings, "audio_highpass_cutoff_hz", 80.0) or 80.0),
+            "lowpass_enable": bool(getattr(settings, "audio_lowpass_enable", False)),
+            "lowpass_cutoff_hz": float(getattr(settings, "audio_lowpass_cutoff_hz", 7600.0) or 7600.0),
+            "bandpass_enable": bool(getattr(settings, "audio_bandpass_enable", False)),
+            "bandpass_low_hz": float(getattr(settings, "audio_bandpass_low_hz", 300.0) or 300.0),
+            "bandpass_high_hz": float(getattr(settings, "audio_bandpass_high_hz", 3400.0) or 3400.0),
             "soft_limit_enable": False,
             "soft_limit_target": 0.98,
             "soft_limit_knee": 2.0,
@@ -2362,6 +2367,8 @@ class TranscriptionEngine:
         should_preprocess_full = (
             getattr(preprocessor_full, "remove_dc_offset", True)
             or getattr(preprocessor_full, "highpass_enable", False)
+            or getattr(preprocessor_full, "lowpass_enable", False)
+            or getattr(preprocessor_full, "bandpass_enable", False)
             or getattr(preprocessor_full, "soft_limit_enable", False)
             or preprocessor_full.normalize_enable
             or preprocessor_full.trim_silence_enable
@@ -2388,6 +2395,8 @@ class TranscriptionEngine:
         should_preprocess_chunk = (
             getattr(preprocessor_chunk, "remove_dc_offset", True)
             or getattr(preprocessor_chunk, "highpass_enable", False)
+            or getattr(preprocessor_chunk, "lowpass_enable", False)
+            or getattr(preprocessor_chunk, "bandpass_enable", False)
             or getattr(preprocessor_chunk, "soft_limit_enable", False)
             or preprocessor_chunk.normalize_enable
             or preprocessor_chunk.denoise_enable
