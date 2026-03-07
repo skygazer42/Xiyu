@@ -29,6 +29,28 @@ def test_asr_options_preprocess_highpass_cutoff_must_be_positive():
         parse_asr_options('{"preprocess":{"highpass_enable":true,"highpass_cutoff_hz":-1}}')
 
 
+def test_asr_options_preprocess_lowpass_and_bandpass_keys_allowed():
+    opts = parse_asr_options(
+        '{"preprocess":{"lowpass_enable":true,"lowpass_cutoff_hz":7600,"bandpass_enable":true,"bandpass_low_hz":300,"bandpass_high_hz":3400}}'
+    )
+    assert opts is not None
+    assert opts["preprocess"]["lowpass_enable"] is True
+    assert opts["preprocess"]["lowpass_cutoff_hz"] == 7600
+    assert opts["preprocess"]["bandpass_enable"] is True
+    assert opts["preprocess"]["bandpass_low_hz"] == 300
+    assert opts["preprocess"]["bandpass_high_hz"] == 3400
+
+
+def test_asr_options_preprocess_lowpass_cutoff_must_be_positive():
+    with pytest.raises(ValueError, match="lowpass_cutoff_hz"):
+        parse_asr_options('{"preprocess":{"lowpass_enable":true,"lowpass_cutoff_hz":0}}')
+
+
+def test_asr_options_preprocess_bandpass_range_must_be_valid():
+    with pytest.raises(ValueError, match="bandpass"):
+        parse_asr_options('{"preprocess":{"bandpass_enable":true,"bandpass_low_hz":3400,"bandpass_high_hz":300}}')
+
+
 def test_asr_options_chunking_boundary_reconcile_keys_allowed():
     opts = parse_asr_options('{"chunking":{"boundary_reconcile_enable":true,"boundary_reconcile_window_s":0.5}}')
     assert opts is not None

@@ -35,6 +35,11 @@ _PREPROCESS_KEYS = {
     "remove_dc_offset",
     "highpass_enable",
     "highpass_cutoff_hz",
+    "lowpass_enable",
+    "lowpass_cutoff_hz",
+    "bandpass_enable",
+    "bandpass_low_hz",
+    "bandpass_high_hz",
     "soft_limit_enable",
     "soft_limit_target",
     "soft_limit_knee",
@@ -99,6 +104,11 @@ _PREPROCESS_TYPES: Dict[str, str] = {
     "remove_dc_offset": "bool",
     "highpass_enable": "bool",
     "highpass_cutoff_hz": "number",
+    "lowpass_enable": "bool",
+    "lowpass_cutoff_hz": "number",
+    "bandpass_enable": "bool",
+    "bandpass_low_hz": "number",
+    "bandpass_high_hz": "number",
     "soft_limit_enable": "bool",
     "soft_limit_target": "number",
     "soft_limit_knee": "number",
@@ -313,6 +323,22 @@ def _validate_ranges(obj: Dict[str, Any]) -> None:
             cutoff = preprocess.get("highpass_cutoff_hz")
             if isinstance(cutoff, (int, float)) and not (float(cutoff) > 0.0):
                 raise ValueError("asr_options.preprocess.highpass_cutoff_hz must be > 0")
+        if "lowpass_cutoff_hz" in preprocess:
+            cutoff = preprocess.get("lowpass_cutoff_hz")
+            if isinstance(cutoff, (int, float)) and not (float(cutoff) > 0.0):
+                raise ValueError("asr_options.preprocess.lowpass_cutoff_hz must be > 0")
+        if "bandpass_low_hz" in preprocess or "bandpass_high_hz" in preprocess:
+            low = preprocess.get("bandpass_low_hz")
+            high = preprocess.get("bandpass_high_hz")
+            if isinstance(low, (int, float)) and not (float(low) > 0.0):
+                raise ValueError("asr_options.preprocess.bandpass_low_hz must be > 0")
+            if isinstance(high, (int, float)) and not (float(high) > 0.0):
+                raise ValueError("asr_options.preprocess.bandpass_high_hz must be > 0")
+            if isinstance(low, (int, float)) and isinstance(high, (int, float)):
+                if not (float(low) < float(high)):
+                    raise ValueError(
+                        "asr_options.preprocess.bandpass_low_hz must be < bandpass_high_hz"
+                    )
         if "soft_limit_target" in preprocess:
             target = preprocess.get("soft_limit_target")
             if isinstance(target, (int, float)) and not (0.0 < float(target) <= 1.0):
