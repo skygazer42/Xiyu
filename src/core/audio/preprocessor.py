@@ -52,6 +52,11 @@ class AudioPreprocessor:
         remove_dc_offset: bool = True,
         highpass_enable: bool = False,
         highpass_cutoff_hz: float = 80.0,
+        lowpass_enable: bool = False,
+        lowpass_cutoff_hz: float = 7600.0,
+        bandpass_enable: bool = False,
+        bandpass_low_hz: float = 300.0,
+        bandpass_high_hz: float = 3400.0,
         soft_limit_enable: bool = False,
         soft_limit_target: float = 0.98,
         soft_limit_knee: float = 2.0,
@@ -78,6 +83,11 @@ class AudioPreprocessor:
             remove_dc_offset: 是否移除 DC offset (均值偏移)
             highpass_enable: 是否启用高通滤波（抑制低频轰鸣/风噪）
             highpass_cutoff_hz: 高通截止频率 (Hz)
+            lowpass_enable: 是否启用低通滤波（抑制高频嘶声/尖锐噪声）
+            lowpass_cutoff_hz: 低通截止频率 (Hz)
+            bandpass_enable: 是否启用带通滤波（更偏电话窄带语音；会议宽带不建议默认）
+            bandpass_low_hz: 带通低频截止 (Hz)
+            bandpass_high_hz: 带通高频截止 (Hz)
             soft_limit_enable: 是否启用软限幅（降低削波尖锐度）
             soft_limit_target: 软限幅目标峰值 (0-1)
             soft_limit_knee: 软限幅曲线强度（越大越“硬”）
@@ -100,6 +110,11 @@ class AudioPreprocessor:
         self.remove_dc_offset = remove_dc_offset
         self.highpass_enable = highpass_enable
         self.highpass_cutoff_hz = highpass_cutoff_hz
+        self.lowpass_enable = lowpass_enable
+        self.lowpass_cutoff_hz = lowpass_cutoff_hz
+        self.bandpass_enable = bandpass_enable
+        self.bandpass_low_hz = bandpass_low_hz
+        self.bandpass_high_hz = bandpass_high_hz
         self.soft_limit_enable = soft_limit_enable
         self.soft_limit_target = soft_limit_target
         self.soft_limit_knee = soft_limit_knee
@@ -116,6 +131,10 @@ class AudioPreprocessor:
 
         # 懒加载人声分离
         self._vocal_separator = None
+
+        # Cache filter coefficients (per instance) to avoid re-designing SOS for
+        # every chunk in long-audio transcription.
+        self._filter_sos_cache = {}
 
     @property
     def nr(self):
@@ -213,6 +232,135 @@ class AudioPreprocessor:
             prev_x = x
             prev_y = y
         return out.astype(np.float32, copy=False)
+
+    @staticmethod
+    def _lowpass_filter_single_pole(
+        audio: np.ndarray,
+        *,
+        cutoff_hz: float,
+        sample_rate: int,
+    ) -> np.ndarray:
+        """Simple single-pole low-pass filter (numpy-only)."""
+        if len(audio) == 0:
+            return audio
+
+        cutoff = float(cutoff_hz)
+        if not (cutoff > 0.0):
+            return audio
+
+        dt = 1.0 / float(sample_rate or 16000)
+        rc = 1.0 / (2.0 * np.pi * cutoff)
+        alpha = dt / (rc + dt)
+
+        out = np.empty_like(audio, dtype=np.float32)
+        out[0] = float(audio[0])
+        prev_y = float(out[0])
+        for i in range(1, len(audio)):
+            x = float(audio[i])
+            y = prev_y + alpha * (x - prev_y)
+            out[i] = y
+            prev_y = y
+        return out.astype(np.float32, copy=False)
+
+    def _design_sos(
+        self,
+        *,
+        btype: str,
+        cutoff_hz: float,
+        sample_rate: int,
+        order: int = 4,
+    ) -> Optional[np.ndarray]:
+        """Design a Butterworth IIR filter in SOS form (SciPy if available)."""
+        sr = int(sample_rate) if int(sample_rate or 0) > 0 else 16000
+        cutoff = float(cutoff_hz)
+        if not (cutoff > 0.0) or not (sr > 0):
+            return None
+
+        nyq = 0.5 * float(sr)
+        if not (cutoff < nyq):
+            return None
+
+        key = (str(btype), float(cutoff), int(sr), int(order))
+        cached = self._filter_sos_cache.get(key)
+        if cached is not None:
+            return cached
+
+        try:
+            from scipy.signal import butter  # type: ignore
+
+            sos = butter(int(order), float(cutoff), btype=str(btype), fs=int(sr), output="sos")
+            sos = np.asarray(sos, dtype=np.float64)
+        except Exception as e:
+            logger.warning("Filter design failed (btype=%s cutoff=%s sr=%s): %s", btype, cutoff, sr, e)
+            return None
+
+        self._filter_sos_cache[key] = sos
+        return sos
+
+    def _apply_filters(self, audio: np.ndarray, *, sample_rate: int) -> np.ndarray:
+        """Apply length-preserving standardization filters (HP/LP/BP)."""
+        if len(audio) == 0:
+            return audio
+
+        sr = int(sample_rate) if int(sample_rate or 0) > 0 else 16000
+        nyq = 0.5 * float(sr)
+
+        x = np.asarray(audio, dtype=np.float32).reshape(-1)
+        y = x
+
+        def _apply_sos(sos: np.ndarray) -> np.ndarray:
+            try:
+                from scipy.signal import sosfilt  # type: ignore
+
+                out = sosfilt(sos, y)
+                return np.asarray(out, dtype=np.float32).reshape(-1)
+            except Exception as e:
+                logger.warning("Filter apply failed (scipy.sosfilt): %s", e)
+                return y
+
+        def _highpass(cutoff: float) -> None:
+            nonlocal y
+            if not (cutoff > 0.0 and cutoff < nyq):
+                return
+            sos = self._design_sos(btype="highpass", cutoff_hz=cutoff, sample_rate=sr)
+            if sos is not None:
+                y = _apply_sos(sos)
+                return
+            # Fallback: numpy-only first-order filter.
+            y = self._highpass_filter_single_pole(y, cutoff_hz=cutoff, sample_rate=sr)
+
+        def _lowpass(cutoff: float) -> None:
+            nonlocal y
+            if not (cutoff > 0.0 and cutoff < nyq):
+                return
+            sos = self._design_sos(btype="lowpass", cutoff_hz=cutoff, sample_rate=sr)
+            if sos is not None:
+                y = _apply_sos(sos)
+                return
+            y = self._lowpass_filter_single_pole(y, cutoff_hz=cutoff, sample_rate=sr)
+
+        if self.bandpass_enable:
+            low = float(self.bandpass_low_hz)
+            high = float(self.bandpass_high_hz)
+            if low > 0.0 and high > 0.0 and low < high and high < nyq:
+                _highpass(low)
+                _lowpass(high)
+            else:
+                logger.warning(
+                    "Bandpass config invalid; skipping (low=%s high=%s sr=%s)",
+                    low,
+                    high,
+                    sr,
+                )
+            return y
+
+        if self.highpass_enable:
+            _highpass(float(self.highpass_cutoff_hz))
+
+        if self.lowpass_enable:
+            _lowpass(float(self.lowpass_cutoff_hz))
+
+        return y
 
     @staticmethod
     def _soft_limit_tanh(
@@ -621,13 +769,9 @@ class AudioPreprocessor:
         if self.remove_dc_offset and len(audio) > 0:
             audio = audio - float(np.mean(audio))
 
-        # 0.1 Optional high-pass (reduce low-frequency rumble).
-        if self.highpass_enable:
-            audio = self._highpass_filter_single_pole(
-                audio,
-                cutoff_hz=self.highpass_cutoff_hz,
-                sample_rate=sample_rate,
-            )
+        # 0.1 Optional filters (length-preserving standardization).
+        if self.bandpass_enable or self.highpass_enable or self.lowpass_enable:
+            audio = self._apply_filters(audio, sample_rate=sample_rate)
 
         # 0.2 Optional soft limiting (reduce hard-clipping harshness).
         if self.soft_limit_enable:
