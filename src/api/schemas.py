@@ -12,6 +12,14 @@ class SentenceInfo(BaseModel):
     speaker_id: Optional[int] = Field(default=None, description="说话人 ID")
 
 
+class WordInfo(BaseModel):
+    """词/Token 时间戳（best-effort，对齐输出）"""
+
+    text: str = Field(..., description="词/Token 文本")
+    start: int = Field(..., description="开始时间 (毫秒)")
+    end: int = Field(..., description="结束时间 (毫秒)")
+
+
 class SpeakerTurn(BaseModel):
     """说话人 turn/段落（合并后的说话人连续发言）"""
     speaker: str = Field(..., description="说话人标签")
@@ -33,6 +41,13 @@ class TranscribeResponse(BaseModel):
     sentences: List[SentenceInfo] = Field(default=[], description="分句信息")
     speaker_turns: Optional[List[SpeakerTurn]] = Field(default=None, description="说话人 turn/段落")
     transcript: Optional[str] = Field(default=None, description="格式化转写稿")
+    words: Optional[List[WordInfo]] = Field(
+        default=None,
+        description=(
+            "词/Token 级时间戳（可选，best-effort）。"
+            "仅在 asr_options.alignment.enable=true 时返回；与 text_accu 对齐（当开启对齐时 text_accu 会被冻结以保证一致性）。"
+        ),
+    )
     srt: Optional[str] = Field(
         default=None,
         description="SRT 字幕内容（可选，基于 sentences 或 speaker_turns 生成，包含说话人标签）",

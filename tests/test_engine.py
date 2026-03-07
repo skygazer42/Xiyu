@@ -461,3 +461,56 @@ def test_transcribe_long_audio_checkpoint_resume_skips_completed_chunks(mock_mod
     assert out["raw_text"] == "第一段第二段"
     assert mock_model_manager.backend.transcribe.call_count == 1
     assert (chunks_dir / "000001.json").exists()
+
+
+def test_transcribe_long_audio_alignment_words_monotonic(mock_model_manager, monkeypatch):
+    """When alignment is enabled, engine should emit `words` with monotonic timestamps."""
+    import numpy as np
+
+    from src.core.audio.chunker import AudioChunker
+    from src.core.engine import TranscriptionEngine
+
+    mock_model_manager.backend.supports_speaker = True
+    mock_model_manager.backend.transcribe.side_effect = [
+        {"text": "你好", "sentence_info": []},
+        {"text": "世界", "sentence_info": []},
+    ]
+
+    engine = TranscriptionEngine()
+
+    # Force 2 chunks.
+    chunker = AudioChunker(max_chunk_duration=0.5, min_chunk_duration=0.1, overlap_duration=0.0)
+    chunk1 = np.zeros(16000, dtype=np.float32)
+    chunk2 = np.zeros(16000, dtype=np.float32)
+    chunker.split = Mock(
+        return_value=[
+            (chunk1, 0, 16000),
+            (chunk2, 16000, 32000),
+        ]
+    )
+    monkeypatch.setattr(engine, "_get_request_chunker", lambda _opts: chunker)
+
+    audio = np.zeros(2 * 16000, dtype=np.float32)
+    out = engine.transcribe_long_audio(
+        audio,
+        apply_hotword=False,
+        max_workers=1,
+        asr_options={
+            "chunking": {"max_chunk_duration_s": 0.5, "overlap_chars": 0},
+            "alignment": {"enable": True, "level": "char", "max_words": 1000},
+        },
+    )
+
+    words = out.get("words")
+    assert isinstance(words, list)
+    assert len(words) > 0
+
+    prev_start = -1
+    prev_end = -1
+    for w in words:
+        assert w["start"] >= 0
+        assert w["end"] >= w["start"]
+        assert w["start"] >= prev_start
+        assert w["end"] >= prev_end
+        prev_start = w["start"]
+        prev_end = w["end"]

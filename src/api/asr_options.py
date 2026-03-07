@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 __all__ = ["parse_asr_options"]
 
 
-_TOP_LEVEL_KEYS = {"preprocess", "chunking", "backend", "postprocess", "speaker", "debug"}
+_TOP_LEVEL_KEYS = {"preprocess", "chunking", "backend", "postprocess", "speaker", "alignment", "debug"}
 
 _PREPROCESS_KEYS = {
     "normalize_enable",
@@ -57,6 +57,11 @@ _CHUNKING_KEYS = {
     "max_workers",
     "infer_batch_size",
     "overlap_chars",
+    # enterprise: chunk checkpointing/resume
+    "checkpoint_enable",
+    "checkpoint_id",
+    "checkpoint_dir",
+    "resume_skip_existing",
 }
 
 _POSTPROCESS_KEYS = {
@@ -84,6 +89,12 @@ _SPEAKER_KEYS = {
     "turn_merge_enable",
     "turn_merge_gap_ms",
     "turn_merge_min_chars",
+}
+
+_ALIGNMENT_KEYS = {
+    "enable",
+    "level",
+    "max_words",
 }
 
 _PREPROCESS_TYPES: Dict[str, str] = {
@@ -126,6 +137,10 @@ _CHUNKING_TYPES: Dict[str, str] = {
     "max_workers": "int",
     "infer_batch_size": "int",
     "overlap_chars": "int",
+    "checkpoint_enable": "bool",
+    "checkpoint_id": "str",
+    "checkpoint_dir": "str",
+    "resume_skip_existing": "bool",
 }
 
 _POSTPROCESS_TYPES: Dict[str, str] = {
@@ -153,6 +168,12 @@ _SPEAKER_TYPES: Dict[str, str] = {
     "turn_merge_enable": "bool",
     "turn_merge_gap_ms": "int",
     "turn_merge_min_chars": "int",
+}
+
+_ALIGNMENT_TYPES: Dict[str, str] = {
+    "enable": "bool",
+    "level": "str",
+    "max_words": "int",
 }
 
 
@@ -195,10 +216,12 @@ def parse_asr_options(asr_options_str: Optional[str]) -> Optional[Dict[str, Any]
     _validate_section(obj, "chunking", allowed_keys=_CHUNKING_KEYS)
     _validate_section(obj, "postprocess", allowed_keys=_POSTPROCESS_KEYS)
     _validate_section(obj, "speaker", allowed_keys=_SPEAKER_KEYS)
+    _validate_section(obj, "alignment", allowed_keys=_ALIGNMENT_KEYS)
     _validate_section_types(obj, "preprocess", type_map=_PREPROCESS_TYPES)
     _validate_section_types(obj, "chunking", type_map=_CHUNKING_TYPES)
     _validate_section_types(obj, "postprocess", type_map=_POSTPROCESS_TYPES)
     _validate_section_types(obj, "speaker", type_map=_SPEAKER_TYPES)
+    _validate_section_types(obj, "alignment", type_map=_ALIGNMENT_TYPES)
 
     chunking = obj.get("chunking") or {}
     if isinstance(chunking, dict) and "strategy" in chunking:
@@ -249,6 +272,17 @@ def parse_asr_options(asr_options_str: Optional[str]) -> Optional[Dict[str, Any]
         if normalized not in ("zh", "numeric"):
             raise ValueError("asr_options.speaker.label_style must be one of: zh, numeric")
         speaker["label_style"] = normalized
+
+    alignment = obj.get("alignment") or {}
+    if isinstance(alignment, dict) and "level" in alignment:
+        lvl = alignment.get("level")
+        if isinstance(lvl, str):
+            normalized = lvl.strip().lower()
+        else:
+            normalized = None
+        if normalized not in ("word", "char"):
+            raise ValueError("asr_options.alignment.level must be one of: word, char")
+        alignment["level"] = normalized
 
     return obj
 
@@ -378,3 +412,10 @@ def _validate_ranges(obj: Dict[str, Any]) -> None:
             mc = speaker.get("turn_merge_min_chars")
             if isinstance(mc, int) and mc < 0:
                 raise ValueError("asr_options.speaker.turn_merge_min_chars must be >= 0")
+
+    alignment = obj.get("alignment") or {}
+    if isinstance(alignment, dict):
+        if "max_words" in alignment:
+            mw = alignment.get("max_words")
+            if isinstance(mw, int) and mw <= 0:
+                raise ValueError("asr_options.alignment.max_words must be > 0")

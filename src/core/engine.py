@@ -3011,12 +3011,59 @@ class TranscriptionEngine:
             except Exception as e:
                 logger.warning(f"Boundary reconcile failed (ignored): {e}")
 
+        # ------------------------------------------------------------
+        # Alignment (word/char timestamps) — best-effort, long-audio only
+        # ------------------------------------------------------------
+        alignment_options = None
+        if isinstance(asr_options, dict):
+            alignment_options = asr_options.get("alignment")
+        if not isinstance(alignment_options, dict):
+            alignment_options = None
+
+        alignment_enable = False
+        alignment_level = "word"
+        alignment_max_words = 20000
+        if alignment_options and not with_speaker:
+            alignment_enable = bool(alignment_options.get("enable", False))
+            alignment_level = str(alignment_options.get("level", "word") or "word")
+            try:
+                alignment_max_words = int(alignment_options.get("max_words", 20000) or 0)
+            except Exception:
+                alignment_max_words = 20000
+            if alignment_max_words <= 0:
+                alignment_max_words = 20000
+
         # 合并结果
-        merged = chunker.merge_results(chunk_results, sample_rate, overlap_chars=overlap_chars)
+        merged = chunker.merge_results(
+            chunk_results,
+            sample_rate,
+            overlap_chars=overlap_chars,
+            return_accu_timestamps=bool(alignment_enable),
+        )
 
         raw_text = merged.get("text", "")
         raw_text_accu = merged.get("text_accu", "") or ""
         sentence_info = merged.get("sentences", [])
+
+        # Compute word-level timestamps based on text_accu's character timestamps.
+        words = None
+        if alignment_enable and raw_text_accu:
+            try:
+                accu_ts = merged.get("accu_ts")
+                if isinstance(accu_ts, list) and len(accu_ts) == len(raw_text_accu):
+                    from src.core.alignment import build_word_timestamps
+
+                    words = build_word_timestamps(
+                        raw_text_accu,
+                        accu_ts,
+                        level=alignment_level,
+                        max_words=alignment_max_words,
+                    )
+            except Exception as e:
+                logger.warning("Alignment words build failed (ignored): %s", e)
+
+        # If alignment is enabled, keep text_accu stable so it matches `words`.
+        freeze_text_accu_for_alignment = bool(alignment_enable and bool(words))
 
         # Some remote/text-only backends don't return sentence timestamps.
         # For long-audio chunking this can result in empty timeline/SRT exports.
@@ -3040,7 +3087,7 @@ class TranscriptionEngine:
                 text, similars = self._apply_corrections(text, post_processor=post_processor)
                 all_similars.extend(similars)
 
-            if text_accu:
+            if text_accu and not freeze_text_accu_for_alignment:
                 text_accu, similars_accu = self._apply_corrections(
                     text_accu, post_processor=post_processor
                 )
@@ -3149,6 +3196,8 @@ class TranscriptionEngine:
                     logger.warning("LLM speaker-turn polish flow failed (ignored): %s", e)
 
             target = text_accu if text_accu else text
+            if freeze_text_accu_for_alignment:
+                target = text
             if target:
                 try:
                     if settings.llm_fulltext_enable:
@@ -3166,9 +3215,12 @@ class TranscriptionEngine:
                         polished = asyncio.run(coro)
 
                     if polished:
-                        text = polished
-                        if text_accu:
-                            text_accu = polished
+                        if freeze_text_accu_for_alignment:
+                            text = polished
+                        else:
+                            text = polished
+                            if text_accu:
+                                text_accu = polished
                 except Exception as e:
                     logger.warning("LLM polish failed (ignored): %s", e)
 
@@ -3188,6 +3240,7 @@ class TranscriptionEngine:
             "raw_text": raw_text,
             "duration": duration,
             "chunks": len(chunks),
+            "words": words,
         }
 
         # 生成格式化转写稿

@@ -349,6 +349,7 @@ class AudioChunker:
         chunk_results: List[Dict[str, Any]],
         sample_rate: int = 16000,
         overlap_chars: int = 10,
+        return_accu_timestamps: bool = False,
     ) -> Dict[str, Any]:
         """合并分块转写结果
 
@@ -356,6 +357,7 @@ class AudioChunker:
             chunk_results: 分块结果列表
             sample_rate: 采样率
             overlap_chars: 重叠文本字符数 (用于去重)
+            return_accu_timestamps: 是否返回 text_accu 的字符级时间戳（用于对齐/检索）
 
         Returns:
             合并后的结果
@@ -440,6 +442,11 @@ class AudioChunker:
             "text": merged_text,
             "text_accu": chars_to_text(merged_accu_chars) if merged_accu_chars else merged_text,
             "sentences": all_sentences,
+            **(
+                {"accu_chars": merged_accu_chars, "accu_ts": merged_accu_ts}
+                if bool(return_accu_timestamps)
+                else {}
+            ),
         }
 
 

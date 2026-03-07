@@ -64,6 +64,17 @@ def test_asr_options_chunking_infer_batch_size_key_allowed():
     assert opts["chunking"]["infer_batch_size"] == 4
 
 
+def test_asr_options_chunking_checkpoint_keys_allowed():
+    opts = parse_asr_options(
+        '{"chunking":{"checkpoint_enable":true,"checkpoint_id":"job1","checkpoint_dir":"/tmp/jobs","resume_skip_existing":true}}'
+    )
+    assert opts is not None
+    assert opts["chunking"]["checkpoint_enable"] is True
+    assert opts["chunking"]["checkpoint_id"] == "job1"
+    assert opts["chunking"]["checkpoint_dir"] == "/tmp/jobs"
+    assert opts["chunking"]["resume_skip_existing"] is True
+
+
 def test_asr_options_chunking_boundary_reconcile_window_must_be_non_negative():
     with pytest.raises(ValueError, match="boundary_reconcile_window_s"):
         parse_asr_options('{"chunking":{"boundary_reconcile_enable":true,"boundary_reconcile_window_s":-0.1}}')
@@ -87,3 +98,21 @@ def test_asr_options_speaker_keys_allowed():
 def test_asr_options_speaker_rejects_unknown_keys():
     with pytest.raises(ValueError, match="asr_options\\.speaker"):
         parse_asr_options('{"speaker":{"wat":1}}')
+
+
+def test_asr_options_alignment_keys_allowed():
+    opts = parse_asr_options('{"alignment":{"enable":true,"level":" WORD ","max_words":123}}')
+    assert opts is not None
+    assert opts["alignment"]["enable"] is True
+    assert opts["alignment"]["level"] == "word"
+    assert opts["alignment"]["max_words"] == 123
+
+
+def test_asr_options_alignment_rejects_unknown_level():
+    with pytest.raises(ValueError, match="alignment\\.level"):
+        parse_asr_options('{"alignment":{"enable":true,"level":"token"}}')
+
+
+def test_asr_options_alignment_max_words_must_be_positive():
+    with pytest.raises(ValueError, match="alignment\\.max_words"):
+        parse_asr_options('{"alignment":{"enable":true,"level":"word","max_words":0}}')
