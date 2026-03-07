@@ -277,6 +277,21 @@ class Settings(BaseSettings):
     task_max_results: int = 200           # 最大缓存任务结果数
     task_result_ttl_s: int = 24 * 3600    # 结果保留时间（秒）
 
+    # ------------------------------------------------------------
+    # Long-audio chunk checkpointing (resume) — enterprise feature
+    # ------------------------------------------------------------
+    # When enabled (globally or per-request via asr_options.chunking.*), the
+    # long-audio chunking engine will persist per-chunk results under:
+    #   outputs_dir/jobs/<checkpoint_id>/
+    # This allows resuming after process/container restarts by skipping chunks
+    # that already succeeded.
+    long_audio_checkpoint_enable: bool = False
+    # Optional override for checkpoint root dir. When empty, defaults to:
+    #   outputs_dir / "jobs"
+    long_audio_checkpoint_dir: str = ""
+    # Skip existing successful chunks when resuming.
+    long_audio_checkpoint_resume_skip_existing: bool = True
+
     # 音频预处理配置
     audio_normalize_enable: bool = True          # 音量归一化
     audio_normalize_target_db: float = -20.0     # 目标电平 (dB)

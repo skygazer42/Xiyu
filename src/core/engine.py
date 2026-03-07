@@ -2428,6 +2428,12 @@ class TranscriptionEngine:
             or preprocessor_chunk.denoise_enable
         )
 
+        # Enterprise: long-audio chunk checkpointing (resume).
+        checkpoint_enable = bool(getattr(settings, "long_audio_checkpoint_enable", False))
+        checkpoint_id_opt: Optional[str] = None
+        checkpoint_dir_opt: Optional[str] = None
+        resume_skip_existing = bool(getattr(settings, "long_audio_checkpoint_resume_skip_existing", True))
+
         chunking_options = None
         if isinstance(asr_options, dict):
             chunking_options = asr_options.get("chunking")
@@ -2443,6 +2449,12 @@ class TranscriptionEngine:
             overlap_chars = int(chunking_options.get("overlap_chars", 20) or 0)
             boundary_reconcile_enable = bool(chunking_options.get("boundary_reconcile_enable", False))
             boundary_reconcile_window_s = float(chunking_options.get("boundary_reconcile_window_s", 1.0) or 0.0)
+
+            # checkpointing (optional)
+            checkpoint_enable = bool(chunking_options.get("checkpoint_enable", checkpoint_enable))
+            checkpoint_id_opt = str(chunking_options.get("checkpoint_id") or "").strip() or None
+            checkpoint_dir_opt = str(chunking_options.get("checkpoint_dir") or "").strip() or None
+            resume_skip_existing = bool(chunking_options.get("resume_skip_existing", resume_skip_existing))
         else:
             try:
                 infer_batch_size = int(getattr(settings, "chunk_infer_batch_size", 1) or 1)
@@ -2567,6 +2579,159 @@ class TranscriptionEngine:
 
         # 分割音频
         chunks = chunker.split(audio, sample_rate)
+        total_chunks = len(chunks)
+
+        # ------------------------------------------------------------
+        # Chunk checkpointing + resume (enterprise)
+        # ------------------------------------------------------------
+        checkpoint_job_dir: Optional[Path] = None
+        checkpoint_chunks_dir: Optional[Path] = None
+        completed_by_idx: Dict[int, Dict[str, Any]] = {}
+
+        if checkpoint_enable:
+            from hashlib import sha1
+            from datetime import datetime
+
+            root_override = str(
+                checkpoint_dir_opt
+                or getattr(settings, "long_audio_checkpoint_dir", "")
+                or ""
+            ).strip()
+            root_dir = Path(root_override) if root_override else (settings.outputs_dir / "jobs")
+            try:
+                root_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+
+            audio_sha1 = ""
+            try:
+                if audio_pcm_bytes:
+                    audio_sha1 = sha1(audio_pcm_bytes).hexdigest()
+            except Exception:
+                audio_sha1 = ""
+
+            checkpoint_id = checkpoint_id_opt
+            if not checkpoint_id:
+                try:
+                    cfg_obj = {
+                        "backend_type": backend_type,
+                        "target_backend": target_backend,
+                        "chunking": {
+                            "strategy": getattr(chunker, "strategy", None),
+                            "max_chunk_duration": float(getattr(chunker, "max_chunk_duration", 0.0) or 0.0),
+                            "min_chunk_duration": float(getattr(chunker, "min_chunk_duration", 0.0) or 0.0),
+                            "overlap_duration": float(getattr(chunker, "overlap_duration", 0.0) or 0.0),
+                            "infer_batch_size": int(infer_batch_size),
+                            "overlap_chars": int(overlap_chars),
+                        },
+                        # Keep the id stable but small: don't include every knob.
+                        "preprocess": {
+                            "denoise_enable": bool(_chunk_cfg.get("denoise_enable")),
+                            "denoise_backend": str(_chunk_cfg.get("denoise_backend") or ""),
+                            "normalize_enable": bool(_chunk_cfg.get("normalize_enable")),
+                            "highpass_enable": bool(_chunk_cfg.get("highpass_enable")),
+                            "lowpass_enable": bool(_chunk_cfg.get("lowpass_enable")),
+                            "bandpass_enable": bool(_chunk_cfg.get("bandpass_enable")),
+                        },
+                    }
+                    cfg_json = json.dumps(cfg_obj, sort_keys=True, ensure_ascii=False)
+                    cfg_sha1 = sha1(cfg_json.encode("utf-8")).hexdigest()
+                except Exception:
+                    cfg_sha1 = ""
+
+                seed = (audio_sha1 or cfg_sha1 or "job")[:12]
+                suffix = (cfg_sha1 or "00000000")[:8]
+                checkpoint_id = f"job-{seed}-{suffix}"
+
+            checkpoint_job_dir = root_dir / str(checkpoint_id)
+            checkpoint_chunks_dir = checkpoint_job_dir / "chunks"
+            try:
+                checkpoint_chunks_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                checkpoint_chunks_dir = None
+
+            meta_path = checkpoint_job_dir / "meta.json"
+            if not meta_path.exists():
+                try:
+                    meta = {
+                        "checkpoint_id": str(checkpoint_id),
+                        "created_at": datetime.utcnow().isoformat() + "Z",
+                        "audio_sha1": audio_sha1,
+                        "sample_rate": int(sample_rate),
+                        "duration_s": float(duration),
+                        "backend": {
+                            "type": backend_type,
+                            "name": backend_name,
+                            "target_backend": target_backend,
+                        },
+                        "chunking": {
+                            "strategy": getattr(chunker, "strategy", None),
+                            "max_chunk_duration": float(getattr(chunker, "max_chunk_duration", 0.0) or 0.0),
+                            "min_chunk_duration": float(getattr(chunker, "min_chunk_duration", 0.0) or 0.0),
+                            "overlap_duration": float(getattr(chunker, "overlap_duration", 0.0) or 0.0),
+                            "infer_batch_size": int(infer_batch_size),
+                            "overlap_chars": int(overlap_chars),
+                        },
+                        "total_chunks": int(total_chunks),
+                        "chunks": [
+                            {
+                                "idx": int(i),
+                                "start_sample": int(start_s),
+                                "end_sample": int(end_s),
+                            }
+                            for i, (_a, start_s, end_s) in enumerate(chunks)
+                        ],
+                    }
+                    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception as e:
+                    logger.warning("Failed to write checkpoint meta.json (ignored): %s", e)
+
+            if resume_skip_existing and checkpoint_chunks_dir is not None and total_chunks > 0:
+                for p in checkpoint_chunks_dir.glob("*.json"):
+                    try:
+                        idx = int(p.stem)
+                    except Exception:
+                        continue
+                    if idx < 0 or idx >= total_chunks:
+                        continue
+                    try:
+                        obj = json.loads(p.read_text(encoding="utf-8"))
+                    except Exception:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    if obj.get("success") is True:
+                        completed_by_idx[idx] = obj
+
+                if completed_by_idx:
+                    logger.info(
+                        "Checkpoint resume enabled: loaded %d/%d chunks from %s",
+                        len(completed_by_idx),
+                        total_chunks,
+                        checkpoint_job_dir,
+                    )
+
+        def _write_checkpoint_chunk(idx: int, payload: Dict[str, Any]) -> None:
+            if checkpoint_chunks_dir is None:
+                return
+            try:
+                tmp = checkpoint_chunks_dir / f"{int(idx):06d}.json.tmp"
+                final = checkpoint_chunks_dir / f"{int(idx):06d}.json"
+                tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(final)
+            except Exception as e:
+                logger.warning("Write checkpoint chunk failed (idx=%s): %s", idx, e)
+
+        def _write_checkpoint_result(payload: Dict[str, Any]) -> None:
+            if checkpoint_job_dir is None:
+                return
+            try:
+                tmp = checkpoint_job_dir / "result.json.tmp"
+                final = checkpoint_job_dir / "result.json"
+                tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(final)
+            except Exception as e:
+                logger.warning("Write checkpoint result failed (ignored): %s", e)
 
         # 定义单块转写函数
         def transcribe_chunk(chunk_audio: np.ndarray) -> Dict[str, Any]:
@@ -2598,8 +2763,6 @@ class TranscriptionEngine:
                 "text": raw_result.get("text", ""),
                 "sentences": raw_result.get("sentence_info", []),
             }
-
-        total_chunks = len(chunks)
         chunk_results: List[Dict[str, Any]] = []
 
         def _report_progress(done: int, total: int) -> None:
@@ -2615,54 +2778,114 @@ class TranscriptionEngine:
         # - 否则：优先 batch 推理（infer_batch_size>1），否则串行逐块推理
         done = 0
         if max_workers > 1 and infer_batch_size <= 1:
-            def _on_chunk_progress(_done: int, _total: int, _res: Dict[str, Any]) -> None:
-                _report_progress(_done, _total)
+            if checkpoint_enable:
+                # Report already-completed chunks first (resume).
+                for idx, (_chunk_audio, start_sample, end_sample) in enumerate(chunks):
+                    if idx in completed_by_idx:
+                        chunk_results.append(completed_by_idx[idx])
+                        done += 1
+                        _report_progress(done, total_chunks)
 
-            chunk_results = chunker.process_parallel(
-                chunks,
-                transcribe_chunk,
-                max_workers=max_workers,
-                on_progress=_on_chunk_progress if progress_callback is not None else None,
-            )
-            done = total_chunks
-        elif infer_batch_size <= 1:
-            # 串行逐块推理（最稳定，避免多线程并发占用显存）
-            for chunk_audio, start_sample, end_sample in chunks:
-                try:
-                    r = transcribe_chunk(chunk_audio)
-                    chunk_results.append(
-                        {
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                def _run_one(idx: int, chunk_audio: np.ndarray, start_sample: int, end_sample: int) -> tuple[int, Dict[str, Any]]:
+                    try:
+                        r = transcribe_chunk(chunk_audio)
+                        payload = {
+                            "idx": int(idx),
                             "start_sample": int(start_sample),
                             "end_sample": int(end_sample),
                             "success": True,
                             "result": r,
                         }
-                    )
-                except Exception as e:
-                    logger.error(f"Chunk processing failed: {e}")
-                    chunk_results.append(
-                        {
+                        return idx, payload
+                    except Exception as e:
+                        payload = {
+                            "idx": int(idx),
                             "start_sample": int(start_sample),
                             "end_sample": int(end_sample),
                             "success": False,
                             "error": str(e),
                         }
-                    )
+                        return idx, payload
+
+                todo = [
+                    (idx, chunk_audio, int(start_sample), int(end_sample))
+                    for idx, (chunk_audio, start_sample, end_sample) in enumerate(chunks)
+                    if idx not in completed_by_idx
+                ]
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(_run_one, idx, chunk_audio, start_sample, end_sample): idx
+                        for idx, chunk_audio, start_sample, end_sample in todo
+                    }
+                    for fut in as_completed(futures):
+                        idx, payload = fut.result()
+                        chunk_results.append(payload)
+                        _write_checkpoint_chunk(idx, payload)
+                        done += 1
+                        _report_progress(done, total_chunks)
+            else:
+                def _on_chunk_progress(_done: int, _total: int, _res: Dict[str, Any]) -> None:
+                    _report_progress(_done, _total)
+
+                chunk_results = chunker.process_parallel(
+                    chunks,
+                    transcribe_chunk,
+                    max_workers=max_workers,
+                    on_progress=_on_chunk_progress if progress_callback is not None else None,
+                )
+                done = total_chunks
+        elif infer_batch_size <= 1:
+            # 串行逐块推理（最稳定，避免多线程并发占用显存）
+            for idx, (chunk_audio, start_sample, end_sample) in enumerate(chunks):
+                if checkpoint_enable and idx in completed_by_idx:
+                    chunk_results.append(completed_by_idx[idx])
+                    done += 1
+                    _report_progress(done, total_chunks)
+                    continue
+                try:
+                    r = transcribe_chunk(chunk_audio)
+                    payload = {
+                        "idx": int(idx),
+                        "start_sample": int(start_sample),
+                        "end_sample": int(end_sample),
+                        "success": True,
+                        "result": r,
+                    }
+                except Exception as e:
+                    logger.error(f"Chunk processing failed: {e}")
+                    payload = {
+                        "idx": int(idx),
+                        "start_sample": int(start_sample),
+                        "end_sample": int(end_sample),
+                        "success": False,
+                        "error": str(e),
+                    }
+                chunk_results.append(payload)
+                if checkpoint_enable:
+                    _write_checkpoint_chunk(idx, payload)
                 done += 1
                 _report_progress(done, total_chunks)
         else:
             # Batch 推理：将多个 chunk 打包成 list，一次调用 backend.transcribe_batch()
-            for i in range(0, total_chunks, infer_batch_size):
-                batch = chunks[i : i + infer_batch_size]
+            batch_specs: List[tuple[int, np.ndarray, int, int]] = []
+
+            def _flush_batch(specs: List[tuple[int, np.ndarray, int, int]]) -> None:
+                nonlocal done
+                if not specs:
+                    return
+
                 batch_bytes: List[bytes] = []
-                batch_meta: List[tuple[int, int]] = []
-                for chunk_audio, start_sample, end_sample in batch:
+                batch_meta: List[tuple[int, int, int]] = []
+                for idx, chunk_audio, start_sample, end_sample in specs:
                     if should_preprocess_chunk:
                         chunk_audio = preprocessor_chunk.process(
                             chunk_audio, sample_rate=sample_rate, validate=False
                         )
                     batch_bytes.append(float32_to_pcm16le_bytes(chunk_audio))
-                    batch_meta.append((int(start_sample), int(end_sample)))
+                    batch_meta.append((int(idx), int(start_sample), int(end_sample)))
 
                 try:
                     if with_speaker and not backend.supports_speaker:
@@ -2689,49 +2912,66 @@ class TranscriptionEngine:
                     if len(raw_batch) < len(batch_meta):
                         raw_batch = list(raw_batch) + [{}] * (len(batch_meta) - len(raw_batch))
 
-                    for j, (start_sample, end_sample) in enumerate(batch_meta):
+                    for j, (idx, start_sample, end_sample) in enumerate(batch_meta):
                         item = raw_batch[j] if j < len(raw_batch) else {}
                         if not isinstance(item, dict):
                             item = {}
-                        chunk_results.append(
-                            {
-                                "start_sample": start_sample,
-                                "end_sample": end_sample,
-                                "success": True,
-                                "result": {
-                                    "text": item.get("text", ""),
-                                    "sentences": item.get("sentence_info", []),
-                                },
-                            }
-                        )
+                        payload = {
+                            "idx": int(idx),
+                            "start_sample": start_sample,
+                            "end_sample": end_sample,
+                            "success": True,
+                            "result": {
+                                "text": item.get("text", ""),
+                                "sentences": item.get("sentence_info", []),
+                            },
+                        }
+                        chunk_results.append(payload)
+                        if checkpoint_enable:
+                            _write_checkpoint_chunk(idx, payload)
                         done += 1
                         _report_progress(done, total_chunks)
 
                 except Exception as e:
                     logger.warning(f"Batch chunk transcription failed, falling back to per-chunk: {e}")
-                    for (chunk_audio, start_sample, end_sample) in batch:
+                    for (idx, chunk_audio, start_sample, end_sample) in specs:
                         try:
                             r = transcribe_chunk(chunk_audio)
-                            chunk_results.append(
-                                {
-                                    "start_sample": int(start_sample),
-                                    "end_sample": int(end_sample),
-                                    "success": True,
-                                    "result": r,
-                                }
-                            )
+                            payload = {
+                                "idx": int(idx),
+                                "start_sample": int(start_sample),
+                                "end_sample": int(end_sample),
+                                "success": True,
+                                "result": r,
+                            }
                         except Exception as e2:
                             logger.error(f"Chunk processing failed: {e2}")
-                            chunk_results.append(
-                                {
-                                    "start_sample": int(start_sample),
-                                    "end_sample": int(end_sample),
-                                    "success": False,
-                                    "error": str(e2),
-                                }
-                            )
+                            payload = {
+                                "idx": int(idx),
+                                "start_sample": int(start_sample),
+                                "end_sample": int(end_sample),
+                                "success": False,
+                                "error": str(e2),
+                            }
+                        chunk_results.append(payload)
+                        if checkpoint_enable:
+                            _write_checkpoint_chunk(idx, payload)
                         done += 1
                         _report_progress(done, total_chunks)
+
+            for idx, (chunk_audio, start_sample, end_sample) in enumerate(chunks):
+                if checkpoint_enable and idx in completed_by_idx:
+                    chunk_results.append(completed_by_idx[idx])
+                    done += 1
+                    _report_progress(done, total_chunks)
+                    continue
+                batch_specs.append((idx, chunk_audio, int(start_sample), int(end_sample)))
+                if len(batch_specs) >= infer_batch_size:
+                    _flush_batch(batch_specs)
+                    batch_specs = []
+
+            if batch_specs:
+                _flush_batch(batch_specs)
 
         # Optional boundary reconciliation (accuracy-first, slower):
         # Re-transcribe a small window around each chunk split and inject it as a

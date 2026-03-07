@@ -387,3 +387,77 @@ def test_transcribe_long_audio_post_process_runs_after_merge_itn_regression(mock
 
     assert out["raw_text"] == "一百零一"
     assert out["text"] == "101"
+
+
+def test_transcribe_long_audio_checkpoint_resume_skips_completed_chunks(mock_model_manager, monkeypatch, tmp_path):
+    """Checkpoint resume should skip chunks that already succeeded.
+
+    This is critical for 3-4h meetings where jobs can be interrupted (restart /
+    network / OOM) and must resume without redoing completed chunks.
+    """
+    import json
+    import numpy as np
+
+    from src.core.audio.chunker import AudioChunker
+    from src.core.engine import TranscriptionEngine
+
+    # Backend is mocked; we only want it to be called for the missing chunk.
+    mock_model_manager.backend.supports_speaker = True
+    mock_model_manager.backend.transcribe.side_effect = [
+        {"text": "第二段", "sentence_info": []},
+    ]
+
+    engine = TranscriptionEngine()
+
+    # Force a deterministic 2-chunk split.
+    chunker = AudioChunker(max_chunk_duration=0.5, min_chunk_duration=0.1, overlap_duration=0.0)
+    chunk1 = np.zeros(16000, dtype=np.float32)
+    chunk2 = np.zeros(16000, dtype=np.float32)
+    chunker.split = Mock(
+        return_value=[
+            (chunk1, 0, 16000),
+            (chunk2, 16000, 32000),
+        ]
+    )
+    monkeypatch.setattr(engine, "_get_request_chunker", lambda _opts: chunker)
+
+    # Pre-write checkpoint for chunk 0.
+    job_id = "job1"
+    job_dir = tmp_path / job_id
+    chunks_dir = job_dir / "chunks"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    (chunks_dir / "000000.json").write_text(
+        json.dumps(
+            {
+                "idx": 0,
+                "start_sample": 0,
+                "end_sample": 16000,
+                "success": True,
+                "result": {"text": "第一段", "sentences": []},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    # 2s float32 audio -> long audio relative to max_chunk_duration=0.5s.
+    audio = np.zeros(2 * 16000, dtype=np.float32)
+    out = engine.transcribe_long_audio(
+        audio,
+        apply_hotword=False,
+        max_workers=1,
+        asr_options={
+            "chunking": {
+                "max_chunk_duration_s": 0.5,
+                "overlap_chars": 0,
+                "checkpoint_enable": True,
+                "checkpoint_dir": str(tmp_path),
+                "checkpoint_id": job_id,
+                "resume_skip_existing": True,
+            }
+        },
+    )
+
+    assert out["raw_text"] == "第一段第二段"
+    assert mock_model_manager.backend.transcribe.call_count == 1
+    assert (chunks_dir / "000001.json").exists()
