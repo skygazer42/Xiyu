@@ -14,6 +14,7 @@ from src.models.model_manager import model_manager
 from src.core.hotword import PhonemeCorrector
 from src.core.hotword.rule_corrector import RuleCorrector
 from src.core.hotword.rectification import RectificationRAG
+from src.core.hotword.variants import parse_hotword_line
 from src.core.speaker import SpeakerLabeler, build_speaker_turns
 from src.core.llm import LLMClient, LLMMessage, PromptBuilder
 from src.core.llm.roles import get_role
@@ -164,10 +165,17 @@ class TranscriptionEngine:
             count = self.corrector.load_hotwords_file(path)
             # 缓存热词列表供 LLM 使用
             with open(path, 'r', encoding='utf-8') as f:
-                self._hotwords_list = [
-                    line.strip() for line in f
-                    if line.strip() and not line.startswith('#')
-                ]
+                # Only keep canonical terms (strip optional alias syntax `a|b|c`).
+                canonical_list: List[str] = []
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#"):
+                        continue
+                    canonical, _aliases = parse_hotword_line(s)
+                    canonical = str(canonical or "").strip()
+                    if canonical:
+                        canonical_list.append(canonical)
+                self._hotwords_list = canonical_list
             logger.info(f"Loaded {count} hotwords from {path}")
             self._hotwords_loaded = True
         else:
@@ -181,11 +189,16 @@ class TranscriptionEngine:
         p = Path(path)
         if p.exists():
             with p.open("r", encoding="utf-8") as f:
-                self._context_hotwords_list = [
-                    line.strip()
-                    for line in f
-                    if line.strip() and not line.startswith("#")
-                ]
+                canonical_list: List[str] = []
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#"):
+                        continue
+                    canonical, _aliases = parse_hotword_line(s)
+                    canonical = str(canonical or "").strip()
+                    if canonical:
+                        canonical_list.append(canonical)
+                self._context_hotwords_list = canonical_list
             logger.info(f"Loaded {len(self._context_hotwords_list)} context hotwords from {path}")
             self._context_hotwords_loaded = True
         else:
@@ -226,13 +239,21 @@ class TranscriptionEngine:
     def update_hotwords(self, hotwords: Union[str, List[str]]):
         """更新热词"""
         if isinstance(hotwords, list):
-            self._hotwords_list = hotwords
+            # Treat provided items as canonical terms.
+            canonical_terms = [str(s).strip() for s in hotwords if str(s).strip()]
+            self._hotwords_list = canonical_terms
             hotwords = "\n".join(hotwords)
         else:
-            self._hotwords_list = [
-                line.strip() for line in hotwords.split('\n')
-                if line.strip() and not line.startswith('#')
-            ]
+            canonical_terms: List[str] = []
+            for line in str(hotwords).split("\n"):
+                s = str(line or "").strip()
+                if not s or s.startswith("#"):
+                    continue
+                canonical, _aliases = parse_hotword_line(s)
+                canonical = str(canonical or "").strip()
+                if canonical:
+                    canonical_terms.append(canonical)
+            self._hotwords_list = canonical_terms
 
         count = self.corrector.update_hotwords(hotwords)
         logger.info(f"Updated {count} hotwords")
@@ -241,13 +262,18 @@ class TranscriptionEngine:
     def update_context_hotwords(self, hotwords: Union[str, List[str]]) -> None:
         """更新上下文热词（仅用于注入提示，不强制替换）"""
         if isinstance(hotwords, list):
-            self._context_hotwords_list = hotwords
+            self._context_hotwords_list = [str(s).strip() for s in hotwords if str(s).strip()]
         else:
-            self._context_hotwords_list = [
-                line.strip()
-                for line in str(hotwords).split("\n")
-                if line.strip() and not line.startswith("#")
-            ]
+            canonical_terms: List[str] = []
+            for line in str(hotwords).split("\n"):
+                s = str(line or "").strip()
+                if not s or s.startswith("#"):
+                    continue
+                canonical, _aliases = parse_hotword_line(s)
+                canonical = str(canonical or "").strip()
+                if canonical:
+                    canonical_terms.append(canonical)
+            self._context_hotwords_list = canonical_terms
 
         logger.info(f"Updated {len(self._context_hotwords_list)} context hotwords")
         self._context_hotwords_loaded = True

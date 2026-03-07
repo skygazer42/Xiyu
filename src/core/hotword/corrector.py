@@ -17,6 +17,11 @@ import numpy as np
 from src.core.hotword.phoneme import Phoneme, get_phoneme_info, SIMILAR_PHONEMES
 from src.core.hotword.rag import FastRAG
 from src.core.hotword.algo_calc import fuzzy_substring_search_constrained
+from src.core.hotword.variants import (
+    generate_hotword_variants,
+    nfkc_normalize,
+    parse_hotword_line,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +104,11 @@ class PhonemeCorrector:
 
         if use_faiss:
             self._init_faiss()
+
+        # Hotword canonical/alias mapping (enterprise mode):
+        # - self.hotwords keys are *variants* used for matching (canonical + aliases + auto variants)
+        # - replacement output must always use canonical
+        self._variant_to_canonical: Dict[str, str] = {}
 
     @property
     def shape_corrector(self):
@@ -209,18 +219,63 @@ class PhonemeCorrector:
         return results
 
     def update_hotwords(self, text: str) -> int:
-        """从文本更新热词"""
-        lines = [l.strip() for l in text.splitlines()
-                 if l.strip() and not l.strip().startswith('#')]
+        """从文本更新热词。
 
-        new_hotwords = {}
-        for hw in lines:
-            phs = get_phoneme_info(hw)
-            if phs:
-                new_hotwords[hw] = phs
+        Supports optional alias syntax per line:
+            canonical | alias1 | alias2
+
+        The matcher will include canonical + aliases + auto-generated variants,
+        but replacements always emit the canonical form.
+
+        Returns:
+            canonical hotword count (stable for API/UI), not total variants.
+        """
+        raw_lines = [
+            l.strip()
+            for l in str(text or "").splitlines()
+            if l.strip() and not l.strip().startswith("#")
+        ]
+
+        new_hotwords: Dict[str, List[Phoneme]] = {}
+        variant_to_canonical: Dict[str, str] = {}
+        canonicals: List[str] = []
+
+        for raw in raw_lines:
+            canonical, aliases = parse_hotword_line(raw)
+            canonical = str(canonical or "").strip()
+            if not canonical:
+                continue
+
+            canonicals.append(canonical)
+
+            variants = set(generate_hotword_variants(canonical))
+
+            # Explicit aliases (also include their NFKC normalized forms to be tolerant).
+            for a in aliases:
+                a0 = str(a or "").strip()
+                if not a0:
+                    continue
+                variants.add(a0)
+                a_nfkc = nfkc_normalize(a0).strip()
+                if a_nfkc:
+                    variants.add(a_nfkc)
+
+            # Ensure canonical itself is always present (even if max_variants truncated).
+            variants.add(canonical)
+
+            for v in variants:
+                vv = str(v or "").strip()
+                if not vv:
+                    continue
+                phs = get_phoneme_info(vv)
+                if not phs:
+                    continue
+                new_hotwords[vv] = phs
+                variant_to_canonical[vv] = canonical
 
         with self._lock:
             self.hotwords = new_hotwords
+            self._variant_to_canonical = variant_to_canonical
             self.fast_rag = FastRAG(threshold=min(self.threshold, self.similar_threshold) - 0.1)
             self.fast_rag.add_hotwords(new_hotwords)
             self._cache.clear()  # 热词变化时清空缓存
@@ -229,7 +284,8 @@ class PhonemeCorrector:
             if self.use_faiss and self._faiss_available:
                 self._build_faiss_index()
 
-        return len(new_hotwords)
+        # Return canonical count (stable across variant generation).
+        return len(set(canonicals))
 
     def load_hotwords_file(self, path: str) -> int:
         """从文件加载热词"""
@@ -322,6 +378,7 @@ class PhonemeCorrector:
         for hw, fast_score in fast_results:
             hw_phonemes = self.hotwords[hw]
             hw_compare = [p.info for p in hw_phonemes]
+            canonical = self._variant_to_canonical.get(hw, hw)
 
             # 使用边界约束搜索
             found_segments = fuzzy_substring_search_constrained(
@@ -336,18 +393,20 @@ class PhonemeCorrector:
 
                 # 音形义联合评分：将字形相似度融入最终分数
                 if self.use_shape_rerank and self.shape_corrector and original != hw:
+                    # IMPORTANT: shape similarity should be computed against the matched variant
+                    # (not canonical) to avoid penalizing "spoken numeric" aliases (二点零 -> 2.0).
                     shape_sim = self.shape_corrector.text_shape_similarity(original, hw)
                     # 联合分数: (1-w)*phoneme + w*shape
                     score = (1 - self.shape_weight) * score + self.shape_weight * shape_sim
 
-                res = MatchResult(char_start, char_end, score, hw, original)
+                res = MatchResult(char_start, char_end, score, canonical, original)
 
                 # 分类到 matches 和 similars
                 if score >= self.threshold:
                     matches.append(res)
 
                 if score >= self.similar_threshold:
-                    similars.append((original, hw, round(score, 3)))
+                    similars.append((original, canonical, round(score, 3)))
 
         # 相似列表去重与排序
         seen_hw = set()
