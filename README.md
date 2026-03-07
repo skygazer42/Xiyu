@@ -72,6 +72,12 @@
 ./scripts/start.sh models router
 ```
 
+政务会议推荐一键启动（**不启用 VibeVoice**，默认会把常用后端 + 说话人 + ClearVoice 降噪都起好，并尽量触发模型下载/预热）：
+
+```bash
+./scripts/bootstrap_gov_meeting.sh
+```
+
 使用建议：
 - 在 `http://<server-ip>:8200` 打开 UI 后，把「转写选项 → 后端」保持在「当前服务 (相对路径)」，这样**所有请求都走 router**，不需要公司网段直连其它端口。
 - Router 页会出现「目标模型（Router）」下拉：你可以在**单端口**下按需选择本次请求走 `qwen3/vibevoice/pytorch/onnx/...`，并且下拉会实时探测目标是否可用（避免选了一个没启动的容器/端口）。

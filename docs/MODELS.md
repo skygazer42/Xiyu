@@ -16,7 +16,10 @@
 ## 0) TL;DR（常用命令）
 
 ```bash
-# 启动常用“全家桶”（含 Qwen3 + VibeVoice；不含 router）
+# 政务会议推荐（不启 VibeVoice）：一键启动（Router 单端口 + 常用后端 + 降噪 + 说话人）
+./scripts/bootstrap_gov_meeting.sh
+
+# 启动“全家桶”（含 Qwen3 + VibeVoice；不含 router；会拉取/启动 vllm/vllm-openai 大镜像）
 docker compose -f docker-compose.models.yml --profile all up -d
 
 # 只启动 PyTorch（建议会议）
@@ -43,6 +46,44 @@ docker compose -f docker-compose.models.yml down
 
 - 每个后端一个容器（每个容器一个端口）
 - API 路径一致，适合前端做“后端选择器”
+
+---
+
+## 1.3 政务会议推荐栈（不启 VibeVoice，默认对外只开 Router）
+
+适用场景：
+- 3–4 小时会议长音频
+- 需要 **说话人**（external diarizer）
+- 需要 **降噪**（ClearVoice，默认 `MossFormer2_48000Hz`）
+- 你们明确 **不启用 VibeVoice**
+
+推荐直接用一键脚本（会自动创建 `.env`、构建镜像、启动必要容器，并尽量触发模型下载/预热）：
+
+```bash
+./scripts/bootstrap_gov_meeting.sh
+```
+
+等价的 Compose 命令（不使用脚本时）：
+
+```bash
+docker compose -f docker-compose.models.yml \
+  --profile router \
+  --profile qwen3 \
+  --profile diarizer \
+  --profile clearvoice \
+  --profile pytorch \
+  --profile onnx \
+  --profile sensevoice \
+  --profile whisper \
+  up -d --build
+```
+
+访问入口（默认）：
+- Web UI + API：`http://<server-ip>:8200`（`PORT_XIYU_ROUTER`）
+
+端口暴露建议（生产强烈推荐）：
+- 公司内网只放行 `8200`
+- 其余 `810x/820x/8300/8400/9001` 端口仅 Docker 内部互通即可
 
 ---
 
