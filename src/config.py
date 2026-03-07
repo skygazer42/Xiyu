@@ -290,6 +290,17 @@ class Settings(BaseSettings):
     audio_adaptive_preprocess: bool = False      # 自适应预处理 (根据 SNR 智能选择)
     audio_snr_threshold: float = 20.0            # SNR 阈值 (低于此值启用降噪)
 
+    # 会议录音“规整化”滤波（长度不变，适合长音频分块）
+    # - 政务会议推荐：启用轻高通去低频轰鸣（80Hz 左右）
+    # - 300~3400Hz 带通更偏“电话窄带”，不建议会议宽带音频默认开启
+    audio_highpass_enable: bool = True           # 轻高通（去低频轰鸣）
+    audio_highpass_cutoff_hz: float = 80.0       # 高通截止频率 (Hz)
+    audio_lowpass_enable: bool = False           # 低通（去高频嘶声/尖锐噪声）
+    audio_lowpass_cutoff_hz: float = 7600.0      # 低通截止频率 (Hz), 16k 采样下建议 < 8000
+    audio_bandpass_enable: bool = False          # 带通（电话/窄带音源可用）
+    audio_bandpass_low_hz: float = 300.0         # 带通低频 (Hz)
+    audio_bandpass_high_hz: float = 3400.0       # 带通高频 (Hz)
+
     # ------------------------------------------------------------
     # ClearVoice (ClearerVoice-Studio) speech enhancement (optional)
     # ------------------------------------------------------------
