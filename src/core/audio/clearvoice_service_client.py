@@ -75,34 +75,123 @@ def clearvoice_service_enhance(
     if timeout <= 0:
         timeout = 600.0
 
-    pcm = float32_to_pcm16le_bytes(x)
-    wav = pcm16le_to_wav_bytes(pcm, sample_rate=sample_rate, channels=1, sampwidth=2)
-
-    files = {"file": ("audio.wav", wav, "audio/wav")}
     url = f"{base}/api/v1/enhance"
 
-    try:
-        with httpx.Client(timeout=timeout, trust_env=False) as client:
+    def _enhance_once(client: httpx.Client, chunk: np.ndarray) -> np.ndarray:
+        pcm = float32_to_pcm16le_bytes(chunk)
+        wav = pcm16le_to_wav_bytes(pcm, sample_rate=sample_rate, channels=1, sampwidth=2)
+        files = {"file": ("audio.wav", wav, "audio/wav")}
+
+        try:
             resp = client.post(url, files=files)
             resp.raise_for_status()
             out_wav = bytes(resp.content or b"")
-    except httpx.HTTPStatusError as e:
-        body = _response_body_head(e.response)
-        raise RuntimeError(f"ClearVoice service HTTP {e.response.status_code}: {body}".strip()) from e
-    except Exception as e:
-        raise RuntimeError(f"ClearVoice service request failed: {e}") from e
+        except httpx.HTTPStatusError as e:
+            body = _response_body_head(e.response)
+            raise RuntimeError(f"ClearVoice service HTTP {e.response.status_code}: {body}".strip()) from e
+        except Exception as e:
+            raise RuntimeError(f"ClearVoice service request failed: {e}") from e
 
-    y, out_sr = wav_bytes_to_float32(out_wav)
-    if int(out_sr) != int(sample_rate):
-        raise RuntimeError(f"ClearVoice service returned sample_rate={out_sr}, expected {sample_rate}")
+        y, out_sr = wav_bytes_to_float32(out_wav)
+        if int(out_sr) != int(sample_rate):
+            raise RuntimeError(f"ClearVoice service returned sample_rate={out_sr}, expected {sample_rate}")
 
-    y = np.asarray(y, dtype=np.float32).reshape(-1)
+        y = np.asarray(y, dtype=np.float32).reshape(-1)
+        if y.size > chunk.size:
+            y = y[: chunk.size]
+        elif y.size < chunk.size:
+            y = np.pad(y, (0, chunk.size - y.size), mode="constant")
+        return y
 
-    # Keep length stable for downstream timestamp assumptions.
-    if y.size > x.size:
-        y = y[: x.size]
-    elif y.size < x.size:
-        y = np.pad(y, (0, x.size - y.size), mode="constant")
+    duration_s = float(x.size) / float(sample_rate)
+    try:
+        max_dur = float(getattr(settings, "clearvoice_service_max_duration_s", 600.0) or 0.0)
+    except Exception:
+        max_dur = 600.0
+    if max_dur < 0:
+        max_dur = 0.0
 
-    return y
+    try:
+        chunk_duration_s = float(getattr(settings, "clearvoice_chunk_duration_s", 30.0) or 30.0)
+    except Exception:
+        chunk_duration_s = 30.0
+    try:
+        overlap_duration_s = float(getattr(settings, "clearvoice_overlap_duration_s", 0.5) or 0.5)
+    except Exception:
+        overlap_duration_s = 0.5
 
+    if chunk_duration_s <= 0:
+        chunk_duration_s = 30.0
+    if overlap_duration_s < 0:
+        overlap_duration_s = 0.0
+
+    # When the audio is longer than the service max duration, we must chunk
+    # client-side; otherwise the service will reject the request.
+    #
+    # NOTE: even if max_dur is set to "unlimited" (<=0), chunking extremely long
+    # audio is still safer (avoids multi-GB multipart bodies).
+    should_chunk = False
+    if max_dur > 0 and duration_s > max_dur:
+        should_chunk = True
+    elif max_dur <= 0 and duration_s > max(600.0, chunk_duration_s * 10.0):
+        should_chunk = True
+
+    try:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
+            if not should_chunk:
+                return _enhance_once(client, x)
+
+            chunk_samples = int(round(chunk_duration_s * sample_rate))
+            overlap_samples = int(round(overlap_duration_s * sample_rate))
+            if chunk_samples <= 0:
+                chunk_samples = int(sample_rate * 30)
+            if overlap_samples < 0:
+                overlap_samples = 0
+            if overlap_samples >= chunk_samples:
+                # Keep progress moving; avoid zero/negative hop.
+                overlap_samples = max(0, chunk_samples // 4)
+
+            hop = max(1, chunk_samples - overlap_samples)
+            if hop <= 0:
+                hop = max(1, chunk_samples)
+
+            logger.info(
+                "ClearVoice service: chunking %ss audio (chunk=%ss, overlap=%ss, max=%ss)",
+                f"{duration_s:.1f}",
+                f"{chunk_duration_s:.1f}",
+                f"{overlap_duration_s:.2f}",
+                f"{max_dur:.0f}" if max_dur > 0 else "unlimited",
+            )
+
+            out = np.zeros((x.size,), dtype=np.float32)
+            n = x.size
+            fade = None
+            if overlap_samples > 0:
+                fade = np.linspace(0.0, 1.0, overlap_samples, dtype=np.float32)
+
+            start = 0
+            chunk_index = 0
+            while start < n:
+                end = min(n, start + chunk_samples)
+                chunk = x[start:end]
+                y = _enhance_once(client, chunk)
+
+                if chunk_index == 0 or overlap_samples <= 0 or fade is None:
+                    out[start:end] = y
+                else:
+                    fade_len = min(overlap_samples, y.size, max(0, n - start))
+                    if fade_len > 0:
+                        f = fade[:fade_len]
+                        out[start : start + fade_len] = out[start : start + fade_len] * (1.0 - f) + y[:fade_len] * f
+                        out[start + fade_len : end] = y[fade_len:]
+                    else:
+                        out[start:end] = y
+
+                chunk_index += 1
+                start += hop
+
+            return out
+    except Exception:
+        # Keep the original exception semantics: caller requested ClearVoice,
+        # so we fail fast instead of silently falling back.
+        raise

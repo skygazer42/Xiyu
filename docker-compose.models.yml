@@ -428,7 +428,9 @@ services:
 
   vibevoice-asr:
     image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
-    profiles: ["vibevoice", "router", "all"]
+    # Keep VibeVoice optional: enabling `router` should not automatically pull/run
+    # the heavyweight vLLM image unless the user explicitly enables `vibevoice`.
+    profiles: ["vibevoice", "all"]
     container_name: vibevoice-asr
     ports:
       - "${PORT_VIBEVOICE_ASR:-9002}:8000"
