@@ -1,6 +1,0 @@
-{
-  "enabledPlugins": {
-    "agent-sdk-dev@claude-code-plugins": true,
-    "code-review@claude-code-plugins": true
-  }
-}
