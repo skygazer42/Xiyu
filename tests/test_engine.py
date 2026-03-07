@@ -232,6 +232,59 @@ def test_transcribe_async_with_speaker_forces_external_diarizer_when_enabled(moc
         assert c.kwargs.get("with_speaker") is False
 
 
+def test_transcribe_async_external_diarizer_applies_llm_to_timeline(mock_model_manager, monkeypatch):
+    from src.core.engine import TranscriptionEngine
+
+    monkeypatch.setattr(engine_mod.settings, "speaker_external_diarizer_enable", True, raising=False)
+    monkeypatch.setattr(
+        engine_mod.settings, "speaker_external_diarizer_base_url", "http://diar:8000", raising=False
+    )
+    monkeypatch.setattr(engine_mod.settings, "llm_enable", True, raising=False)
+    monkeypatch.setattr(engine_mod.settings, "llm_fulltext_enable", False, raising=False)
+
+    async def fake_fetch(*args, **kwargs):
+        return [
+            {"spk": 0, "start": 0, "end": 1000},
+            {"spk": 1, "start": 1000, "end": 2000},
+        ]
+
+    mock_model_manager.backend.supports_speaker = False
+    mock_model_manager.backend.transcribe.side_effect = [
+        {"text": "原文A", "sentence_info": []},
+        {"text": "原文B", "sentence_info": []},
+    ]
+
+    engine = TranscriptionEngine()
+
+    async def fake_polish_with_context(sentences, role="default", context_sentences=1, similarity_candidates=None):
+        for s in sentences:
+            s["text"] = f"LLM({role}):{s.get('text','')}"
+        return sentences
+
+    # Avoid real network calls in unit tests: we only assert LLM integration wiring.
+    engine._apply_llm_polish = AsyncMock(side_effect=lambda text, **_: text)  # type: ignore[method-assign]
+    engine._apply_llm_polish_with_context = AsyncMock(side_effect=fake_polish_with_context)  # type: ignore[method-assign]
+
+    audio_bytes = b"\x00" * (2 * 16000 * 2)
+
+    with patch.object(engine_mod, "fetch_diarizer_segments", new=fake_fetch):
+        out = asyncio.run(
+            engine.transcribe_async(
+                audio_bytes,
+                with_speaker=True,
+                apply_hotword=False,
+                apply_llm=True,
+                llm_role="policy_polish_strict",
+            )
+        )
+
+    assert out.get("sentences"), "external diarizer should return timeline sentences"
+    assert out.get("transcript"), "speaker output should include a transcript"
+    assert "LLM(policy_polish_strict):原文A" in out["transcript"]
+    assert "LLM(policy_polish_strict):原文B" in out["transcript"]
+    engine._apply_llm_polish_with_context.assert_awaited_once()
+
+
 def test_transcribe_with_speaker_unsupported_backend_can_be_ignored(mock_model_manager, monkeypatch):
     from src.core.engine import TranscriptionEngine
 

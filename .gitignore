@@ -61,6 +61,9 @@ data/_tmp/
 .tmp_gh/
 .tmp_gitclone/
 
+# Local scratch outputs (debug artifacts)
+tmp/
+
 # OS
 .DS_Store
 Thumbs.db

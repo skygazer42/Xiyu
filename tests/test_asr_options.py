@@ -87,6 +87,12 @@ def test_asr_options_postprocess_spoken_punc_and_acronym_keys_allowed():
     assert opts["postprocess"]["acronym_merge_enable"] is True
 
 
+def test_asr_options_postprocess_gov_format_key_allowed():
+    opts = parse_asr_options('{"postprocess":{"gov_format_enable":false}}')
+    assert opts is not None
+    assert opts["postprocess"]["gov_format_enable"] is False
+
+
 def test_asr_options_speaker_keys_allowed():
     opts = parse_asr_options('{"speaker":{"label_style":"numeric","turn_merge_enable":true,"turn_merge_gap_ms":800}}')
     assert opts is not None

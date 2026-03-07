@@ -21,10 +21,17 @@ set -uo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-PORTS="${PORTS:-8101 8102 8103 8104 8105 8201 8202}"
+#
+# Default ports:
+# - We intentionally exclude optional backends (GGUF=8104, VibeVoice=8202) so
+#   the smoke test passes in the common "Qwen3-only (no VibeVoice)" deployment.
+# - Override with PORTS="..." if you have other profiles running.
+PORTS="${PORTS:-8000 8101 8102 8103 8105 8201}"
 # Use `-` (not `:-`) so DIARIZER_PORT="" can intentionally disable diarizer checks.
 DIARIZER_PORT="${DIARIZER_PORT-8300}"
-REMOTE_ASR_PORTS="${REMOTE_ASR_PORTS:-9001 9002}"
+# Remote ASR readiness checks:
+# - Default to Qwen3-ASR only (9001). VibeVoice (9002) is optional.
+REMOTE_ASR_PORTS="${REMOTE_ASR_PORTS:-9001}"
 SKIP_REMOTE_ASR_CHECKS="${SKIP_REMOTE_ASR_CHECKS:-false}"
 TIMEOUT_S="${TIMEOUT_S:-10}"
 # Transcribe calls can be slow (first-time model download/warmup), especially for

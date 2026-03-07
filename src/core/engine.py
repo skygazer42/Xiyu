@@ -349,6 +349,7 @@ class TranscriptionEngine:
             spacing_cjk_ascii_enable=settings.spacing_cjk_ascii_enable,
             spoken_punc_enable=settings.spoken_punc_enable,
             acronym_merge_enable=settings.acronym_merge_enable,
+            gov_format_enable=getattr(settings, "gov_format_enable", True),
             zh_convert_enable=settings.zh_convert_enable,
             zh_convert_locale=settings.zh_convert_locale,
             punc_convert_enable=settings.punc_convert_enable,
@@ -1273,6 +1274,16 @@ class TranscriptionEngine:
                     except Exception as e:
                         logger.warning("LLM polish for speaker turns failed (ignored): %s", e)
 
+                    # Final numeric/template formatting (ITN + gov templates) after LLM,
+                    # so the returned speaker timeline stays consistent with `text/transcript`.
+                    if apply_hotword:
+                        try:
+                            for t in speaker_turns:
+                                if t.get("text"):
+                                    t["text"] = post_processor.process_final(str(t.get("text") or ""))
+                        except Exception as e:
+                            logger.warning("Final postprocess for speaker turns failed (ignored): %s", e)
+
                     out_sentences = [
                         {
                             "text": str(t.get("text") or ""),
@@ -1314,6 +1325,13 @@ class TranscriptionEngine:
                         text = asyncio.run(coro)
                 except Exception as e:
                     logger.warning("LLM polish failed (ignored): %s", e)
+
+                # Final numeric/template formatting after LLM (best-effort).
+                if apply_hotword:
+                    try:
+                        text = post_processor.process_final(text)
+                    except Exception as e:
+                        logger.warning("Final postprocess after LLM failed (ignored): %s", e)
 
         # 构建返回结果
         result = {
@@ -2138,16 +2156,39 @@ class TranscriptionEngine:
             return None
 
         raw_text = "".join(raw_text_parts)
-        text = "".join([s.get("text", "") for s in out_sentences])
-        if apply_llm:
-            if settings.llm_fulltext_enable:
-                text = await self._apply_llm_fulltext_polish(
-                    text,
-                    max_chars=settings.llm_fulltext_max_chars,
+        # LLM polish (speaker-aware): keep timeline (`sentences`/`speaker_turns`) consistent.
+        # NOTE: fulltext polish returns a single blob and is hard to map back onto
+        # speaker turns reliably; prefer sentence/turn polish here even if
+        # `LLM_FULLTEXT_ENABLE=true`.
+        if apply_llm and bool(getattr(settings, "llm_enable", False)):
+            try:
+                ctx_n = int(getattr(settings, "llm_context_sentences", 1) or 0)
+            except Exception:
+                ctx_n = 1
+            if ctx_n < 0:
+                ctx_n = 0
+
+            try:
+                out_sentences = await self._apply_llm_polish_with_context(
+                    out_sentences,
+                    role=llm_role,
+                    context_sentences=ctx_n,
                     similarity_candidates=[],
                 )
-            else:
-                text = await self._apply_llm_polish(text, role=llm_role, similarity_candidates=[])
+            except Exception as e:
+                logger.warning("LLM polish for external diarizer sentences failed (ignored): %s", e)
+
+        # Final numeric/template formatting after LLM so the returned timeline
+        # is enterprise-stable (e.g. ISO dates, doc numbers).
+        if apply_hotword:
+            try:
+                for s in out_sentences:
+                    if s.get("text"):
+                        s["text"] = post_processor.process_final(str(s.get("text") or ""))
+            except Exception as e:
+                logger.warning("Final postprocess for external diarizer sentences failed (ignored): %s", e)
+
+        text = "".join([s.get("text", "") for s in out_sentences])
 
         # Build speaker turns for readable transcript output.
         speaker_turns: List[Dict[str, Any]] = []

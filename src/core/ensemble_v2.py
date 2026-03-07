@@ -27,6 +27,7 @@ import httpx
 from src.config import settings
 from src.core.speaker import SpeakerLabeler
 from src.core.llm.roles import get_role
+from src.core.text_processor.post_processor import PostProcessorSettings, TextPostProcessor
 
 # Reuse the well-tested HTTP + parsing helpers from the original module.
 from src.core.ensemble import (  # noqa: PLC0415
@@ -232,6 +233,40 @@ async def transcribe_all_models(
         max_concurrent = 1
 
     merged_asr_options = _merge_asr_options(asr_options, with_speaker=with_speaker)
+    post_processor = TextPostProcessor.from_config(settings)
+    try:
+        postprocess_section = (
+            (merged_asr_options or {}).get("postprocess") if isinstance(merged_asr_options, dict) else None
+        )
+        if isinstance(postprocess_section, dict) and postprocess_section:
+            # Base from Settings, then override known keys (similar to engine).
+            pp_settings = PostProcessorSettings(
+                filler_remove_enable=settings.filler_remove_enable,
+                filler_aggressive=settings.filler_aggressive,
+                qj2bj_enable=settings.qj2bj_enable,
+                itn_enable=settings.itn_enable,
+                itn_erhua_remove=settings.itn_erhua_remove,
+                spacing_cjk_ascii_enable=settings.spacing_cjk_ascii_enable,
+                spoken_punc_enable=settings.spoken_punc_enable,
+                acronym_merge_enable=settings.acronym_merge_enable,
+                gov_format_enable=getattr(settings, "gov_format_enable", True),
+                zh_convert_enable=settings.zh_convert_enable,
+                zh_convert_locale=settings.zh_convert_locale,
+                punc_convert_enable=settings.punc_convert_enable,
+                punc_add_space=settings.punc_add_space,
+                punc_restore_enable=settings.punc_restore_enable,
+                punc_restore_model=settings.punc_restore_model,
+                punc_restore_device=settings.device,
+                punc_merge_enable=settings.punc_merge_enable,
+                trash_punc_enable=settings.trash_punc_enable,
+                trash_punc_chars=settings.trash_punc_chars,
+            )
+            for k, v in postprocess_section.items():
+                if hasattr(pp_settings, k):
+                    setattr(pp_settings, k, v)
+            post_processor = TextPostProcessor(pp_settings)
+    except Exception:
+        post_processor = TextPostProcessor.from_config(settings)
 
     limits = httpx.Limits(max_connections=max(8, len(targets) + 2), max_keepalive_connections=8)
     async with httpx.AsyncClient(limits=limits) as client:
@@ -326,6 +361,16 @@ async def transcribe_all_models(
             if polished_map and idx in polished_map:
                 t2["text"] = polished_map[idx]
             final_turns.append(t2)
+
+        # Final numeric/template formatting after LLM so the final transcript
+        # uses enterprise-stable formats (ISO dates, doc numbers, money units).
+        if apply_hotword:
+            try:
+                for t in final_turns:
+                    if t.get("text"):
+                        t["text"] = post_processor.process_final(str(t.get("text") or ""))
+            except Exception as e:
+                logger.warning("Postprocess final for ensemble turns failed (ignored): %s", e)
 
         label_style = "numeric"
         try:

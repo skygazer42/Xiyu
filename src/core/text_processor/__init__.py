@@ -26,6 +26,7 @@ from .spacing import SpacingProcessor, add_cjk_ascii_spacing
 from .text_corrector import TextCorrector
 from .punctuation_restorer import PunctuationRestorer
 from .post_processor import TextPostProcessor, PostProcessorSettings
+from .gov_formatter import format_gov_numbers
 from .stream_merger import StreamTextMerger
 
 __all__ = [
@@ -57,6 +58,8 @@ __all__ = [
     # 统一后处理器
     'TextPostProcessor',
     'PostProcessorSettings',
+    # 政务会议数字/格式模板化
+    'format_gov_numbers',
     # 流式去重
     'StreamTextMerger',
 ]

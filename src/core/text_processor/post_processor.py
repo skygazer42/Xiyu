@@ -18,6 +18,7 @@ from .zh_convert import ZhConverter
 from .punctuation import PunctuationConverter, FullwidthNormalizer, merge_punctuation
 from .filler_remover import FillerRemover
 from .spacing import SpacingProcessor
+from .gov_formatter import format_gov_numbers
 
 
 @dataclass
@@ -42,6 +43,12 @@ class PostProcessorSettings:
 
     # 英文缩写合并：A I -> AI, V S Code -> VS Code
     acronym_merge_enable: bool = False
+
+    # 政务会议数字/格式模板化（在 ITN 之后执行）
+    # - 2025年5月7日/号 -> 2025-05-07
+    # - 常政办发[2025] 12 号 -> 常政办发〔2025〕12号
+    # - 1.2 亿 元 -> 1.2亿元
+    gov_format_enable: bool = True
 
     # 繁简转换
     zh_convert_enable: bool = False
@@ -96,6 +103,7 @@ class TextPostProcessor:
         self.settings = settings
         self._spoken_punc_enable = bool(getattr(settings, "spoken_punc_enable", False))
         self._acronym_merge_enable = bool(getattr(settings, "acronym_merge_enable", False))
+        self._gov_format_enable = bool(getattr(settings, "gov_format_enable", True))
 
         # 按需初始化各组件
         self.filler_remover = (
@@ -254,6 +262,10 @@ class TextPostProcessor:
         if self.itn:
             text = self.itn.convert(text)
 
+        # 4.2 政务会议数字/格式模板化（在 ITN 之后，避免中文数字未转换导致规则漏匹配）
+        if self._gov_format_enable:
+            text = format_gov_numbers(text)
+
         # 4.5 英文缩写合并（在 spacing 之前）
         text = self._merge_english_acronyms(text)
 
@@ -278,6 +290,51 @@ class TextPostProcessor:
             text = text.rstrip(self.trash_punc_chars)
 
         return text
+
+    def process_final(self, text: str) -> str:
+        """Final formatting stage for *already-polished* text (e.g. after LLM).
+
+        We intentionally avoid:
+        - filler removal (content deletion)
+        - punctuation restoration models (extra latency + non-determinism)
+
+        The goal is to make numeric templates stable (ITN + gov formatting),
+        without "rewriting" content.
+        """
+        if not text:
+            return text
+
+        out = text
+
+        if self.fullwidth_normalizer:
+            out = self.fullwidth_normalizer.normalize(out)
+
+        out = self._apply_spoken_punctuation_commands(out)
+
+        if self.itn:
+            out = self.itn.convert(out)
+
+        if self._gov_format_enable:
+            out = format_gov_numbers(out)
+
+        out = self._merge_english_acronyms(out)
+
+        if self.spacing_processor:
+            out = self.spacing_processor.add_spacing(out)
+
+        if self.zh_converter:
+            out = self.zh_converter.convert(out, self.settings.zh_convert_locale)
+
+        if self.punc_converter:
+            out = self.punc_converter.to_half(out)
+
+        if self.punc_merge_enable:
+            out = merge_punctuation(out)
+
+        if self.trash_punc_enable and out:
+            out = out.rstrip(self.trash_punc_chars)
+
+        return out
 
     def process_filler_remove(self, text: str) -> str:
         """仅执行填充词移除"""
@@ -336,6 +393,7 @@ class TextPostProcessor:
             spacing_cjk_ascii_enable=getattr(config, 'spacing_cjk_ascii_enable', False),
             spoken_punc_enable=getattr(config, 'spoken_punc_enable', False),
             acronym_merge_enable=getattr(config, 'acronym_merge_enable', False),
+            gov_format_enable=getattr(config, 'gov_format_enable', True),
             zh_convert_enable=getattr(config, 'zh_convert_enable', False),
             zh_convert_locale=getattr(config, 'zh_convert_locale', 'zh-hans'),
             punc_convert_enable=getattr(config, 'punc_convert_enable', False),
