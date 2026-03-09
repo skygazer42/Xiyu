@@ -1,16 +1,16 @@
-version: '3.8'
+version: '3.8'  # (Legacy) ONNX-only single-container variant
 
-# SenseVoice 后端部署配置
-# 使用 SenseVoice 进行超高速推理
-# 10秒音频仅需 70ms，比 Whisper-Large 快 15 倍
+# ONNX 后端部署配置
+# 使用 ONNX Runtime 进行高性能推理
+# 适用于 CPU 部署，性能提升 2-10x
 
 services:
-  xiyu-sensevoice:
+  xiyu-onnx:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: xiyu-speech-service:sensevoice
-    container_name: xiyu-service-sensevoice
+      dockerfile: Dockerfile.onnx
+    image: xiyu-speech-service:onnx
+    container_name: xiyu-service-onnx
     ports:
       - "${PORT:-8000}:8000"
     volumes:
@@ -19,15 +19,14 @@ services:
       - huggingface-cache:/root/.cache/huggingface
       # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise
       - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
+      - onnx-cache:/root/.cache/funasr_onnx
     environment:
       # 后端配置
-      - ASR_BACKEND=sensevoice
-      - SENSEVOICE_MODEL=${SENSEVOICE_MODEL:-iic/SenseVoiceSmall}
-      - SENSEVOICE_LANGUAGE=${SENSEVOICE_LANGUAGE:-zh}
-      # 设备配置
-      - DEVICE=${DEVICE:-cuda}
-      - NGPU=${NGPU:-1}
-      - NCPU=${NCPU:-4}
+      - ASR_BACKEND=onnx
+      - ONNX_QUANTIZE=${ONNX_QUANTIZE:-true}
+      # 设备配置 (ONNX 主要优化 CPU 推理)
+      - DEVICE=${DEVICE:-cpu}
+      - NCPU=${NCPU:-8}
       # 通用配置
       - DEBUG=${DEBUG:-false}
       - HOTWORDS_THRESHOLD=${HOTWORDS_THRESHOLD:-0.85}
@@ -44,13 +43,9 @@ services:
       - SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S=${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      # ONNX Runtime 优化
+      - OMP_NUM_THREADS=${NCPU:-8}
+      - MKL_NUM_THREADS=${NCPU:-8}
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -62,8 +57,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s  # ONNX 模型首次加载需要更多时间
 
 volumes:
   model-cache:
   huggingface-cache:
+  onnx-cache:

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     version: str = "1.0.0"
     debug: bool = False
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 18200
 
     # 路径配置
     base_dir: Path = Path(__file__).parent.parent
@@ -164,7 +164,7 @@ class Settings(BaseSettings):
     vibevoice_asr_api_key: str = "EMPTY"
     vibevoice_asr_timeout_s: float = 600.0
     vibevoice_asr_use_chat_completions_fallback: bool = True
-    # NOTE: used by docker-compose.remote-asr.yml for vLLM container tuning.
+    # NOTE: used by docker/compose/legacy/docker-compose.remote-asr.yml for vLLM container tuning.
     # Keep in Settings so extra env vars in local .env won't break app import/tests.
     vibevoice_gpu_memory_utilization: Optional[float] = None
 

@@ -1,39 +1,147 @@
-version: '3.8'
+# Single-stack deployment (recommended):
+# - Public entry: `xiyu-router` (Web UI + API) -> http://<server-ip>:${PORT:-18200}
+# - Internal model services are only reachable within the Docker network.
+
+x-proxy-env: &proxy-env
+  HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  ALL_PROXY: ${ALL_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1}
+  http_proxy: ${http_proxy:-}
+  https_proxy: ${https_proxy:-}
+  all_proxy: ${all_proxy:-}
+  no_proxy: ${no_proxy:-localhost,127.0.0.1,::1}
+
+x-logging: &xiyu-logging
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "3"
+
+x-xiyu-env: &xiyu-env
+  <<: *proxy-env
+  DEBUG: ${DEBUG:-false}
+
+  # Hotwords
+  HOTWORDS_FILE: ${HOTWORDS_FILE:-hotwords.txt}
+  HOTWORDS_CONTEXT_FILE: ${HOTWORDS_CONTEXT_FILE:-hotwords-context.txt}
+  HOTWORD_WATCH_ENABLE: ${HOTWORD_WATCH_ENABLE:-true}
+  HOTWORD_WATCH_DEBOUNCE: ${HOTWORD_WATCH_DEBOUNCE:-3.0}
+  HOTWORDS_THRESHOLD: ${HOTWORDS_THRESHOLD:-0.85}
+  HOTWORD_INJECTION_ENABLE: ${HOTWORD_INJECTION_ENABLE:-true}
+  HOTWORD_INJECTION_MAX: ${HOTWORD_INJECTION_MAX:-50}
+
+  # Text post-processing
+  GOV_FORMAT_ENABLE: ${GOV_FORMAT_ENABLE:-true}
+  ITN_ENABLE: ${ITN_ENABLE:-true}
+  QJ2BJ_ENABLE: ${QJ2BJ_ENABLE:-true}
+
+  # Warmup
+  WARMUP_ON_STARTUP: ${WARMUP_ON_STARTUP:-true}
+  WARMUP_AUDIO_DURATION: ${WARMUP_AUDIO_DURATION:-1.0}
+
+  # LLM (optional)
+  LLM_ENABLE: ${LLM_ENABLE:-false}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_BACKEND: ${LLM_BACKEND:-auto}
+
+  # Speaker diarization (external)
+  SPEAKER_UNSUPPORTED_BEHAVIOR: ${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
+  SPEAKER_EXTERNAL_DIARIZER_ENABLE: ${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-true}
+  SPEAKER_EXTERNAL_DIARIZER_BASE_URL: http://xiyu-diarizer:8000
+  SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S: ${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-180}
+  SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-1000}
+  SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S: ${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-45}
+
+  # ClearVoice denoise microservice
+  CLEARVOICE_ENABLE: ${CLEARVOICE_ENABLE:-true}
+  CLEARVOICE_MODEL: ${CLEARVOICE_MODEL:-MossFormer2_48000Hz}
+  CLEARVOICE_FORCE_CPU: ${CLEARVOICE_FORCE_CPU:-false}
+  CLEARVOICE_STUDIO_DIR: ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
+  CLEARVOICE_CHUNK_DURATION_S: ${CLEARVOICE_CHUNK_DURATION_S:-30.0}
+  CLEARVOICE_OVERLAP_DURATION_S: ${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
+  CLEARVOICE_SERVICE_BASE_URL: http://xiyu-clearvoice:8000
+  CLEARVOICE_SERVICE_TIMEOUT_S: ${CLEARVOICE_SERVICE_TIMEOUT_S:-600.0}
+  CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S: ${CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S:-2.0}
+
+x-xiyu-base: &xiyu-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: xiyu-speech-service:pytorch
+  restart: unless-stopped
+  logging: *xiyu-logging
+  volumes:
+    - ./data:/app/data
+    - modelscope-cache:/root/.cache/modelscope
+    - huggingface-cache:/root/.cache/huggingface
+    # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise.
+    - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
 
 services:
-  xiyu-clearvoice:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: xiyu-speech-service:pytorch
-    profiles: ["clearvoice"]
-    container_name: xiyu-clearvoice
+  # Public entry (ONLY this port is published)
+  xiyu-router:
+    <<: *xiyu-base
     ports:
-      - "${PORT_CLEARVOICE:-8400}:8000"
-    volumes:
-      - ./data:/app/data
-      # Persist ClearVoice checkpoints (ClearerVoice-Studio defaults to ./checkpoints/...).
-      - ./data/models/clearvoice:/app/checkpoints
-      - model-cache:/root/.cache/modelscope
-      - huggingface-cache:/root/.cache/huggingface
-      - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
+      - "${PORT:-18200}:8000"
     environment:
-      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
-      - HTTP_PROXY=${HTTP_PROXY:-}
-      - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - ALL_PROXY=${ALL_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,::1}
-      - DEVICE=${CLEARVOICE_DEVICE:-cpu}
-      - NGPU=${CLEARVOICE_NGPU:-0}
-      - NCPU=${CLEARVOICE_NCPU:-4}
-      - CLEARVOICE_ENABLE=${CLEARVOICE_ENABLE:-true}
-      - CLEARVOICE_STUDIO_DIR=${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
-      - CLEARVOICE_MODEL=${CLEARVOICE_MODEL:-MossFormer2_48000Hz}
-      - CLEARVOICE_FORCE_CPU=${CLEARVOICE_FORCE_CPU:-true}
-      - CLEARVOICE_CHUNK_DURATION_S=${CLEARVOICE_CHUNK_DURATION_S:-30.0}
-      - CLEARVOICE_OVERLAP_DURATION_S=${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
-      - CLEARVOICE_SERVICE_MAX_DURATION_S=${CLEARVOICE_SERVICE_MAX_DURATION_S:-600.0}
-      - CLEARVOICE_WARMUP_ON_STARTUP=${CLEARVOICE_WARMUP_ON_STARTUP:-false}
+      <<: *xiyu-env
+      ASR_BACKEND: router
+      DEVICE: ${ROUTER_DEVICE:-cpu}
+      NGPU: ${ROUTER_NGPU:-0}
+      NCPU: ${ROUTER_NCPU:-4}
+
+      # Remote Qwen3-ASR server (internal)
+      QWEN3_ASR_BASE_URL: http://qwen3-asr:8000
+      QWEN3_ASR_MODEL: ${QWEN3_MODEL_ID:-Qwen/Qwen3-ASR-1.7B}
+      QWEN3_ASR_API_KEY: ${QWEN3_ASR_API_KEY:-EMPTY}
+      QWEN3_ASR_TIMEOUT_S: ${QWEN3_ASR_TIMEOUT_S:-60}
+
+      # Router policy (NO VibeVoice by default)
+      ROUTER_SHORT_BACKEND: ${ROUTER_SHORT_BACKEND:-qwen3}
+      ROUTER_LONG_BACKEND: ${ROUTER_LONG_BACKEND:-qwen3}
+      ROUTER_LONG_AUDIO_THRESHOLD_S: ${ROUTER_LONG_AUDIO_THRESHOLD_S:-60}
+      ROUTER_FORCE_VIBEVOICE_WHEN_WITH_SPEAKER: ${ROUTER_FORCE_VIBEVOICE_WHEN_WITH_SPEAKER:-false}
+    depends_on:
+      - qwen3-asr
+      - xiyu-qwen3
+      - xiyu-pytorch
+      - xiyu-onnx
+      - xiyu-sensevoice
+      - xiyu-whisper
+      - xiyu-diarizer
+      - xiyu-clearvoice
+
+  # Remote ASR server (internal-only)
+  qwen3-asr:
+    image: ${QWEN3_ASR_IMAGE:-qwenllm/qwen3-asr:latest}
+    restart: unless-stopped
+    logging: *xiyu-logging
+    ipc: host
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - modelscope-cache:/root/.cache/modelscope
+      - ./docker/remote-asr/start_qwen3_asr.sh:/start_qwen3_asr.sh:ro
+    command:
+      [
+        "bash",
+        "-lc",
+        "tr -d '\\r' < /start_qwen3_asr.sh > /tmp/start_qwen3_asr.sh && chmod +x /tmp/start_qwen3_asr.sh && bash /tmp/start_qwen3_asr.sh",
+      ]
+    shm_size: "4gb"
+    environment:
+      <<: *proxy-env
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+      PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+      QWEN3_MODEL_ID: ${QWEN3_MODEL_ID:-Qwen/Qwen3-ASR-1.7B}
+      QWEN3_MODEL_PATH: ${QWEN3_MODEL_PATH:-}
+      QWEN3_MAX_MODEL_LEN: ${QWEN3_MAX_MODEL_LEN:-16384}
+      GPU_MEMORY_UTILIZATION: ${QWEN3_GPU_MEMORY_UTILIZATION:-0.45}
+      MODEL_SOURCE: ${MODEL_SOURCE:-modelscope}
+      PORT: 8000
     deploy:
       resources:
         reservations:
@@ -41,85 +149,148 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    command: ["python", "-m", "uvicorn", "src.clearvoice_service:app", "--host", "0.0.0.0", "--port", "8000"]
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
 
+  # Xiyu wrapper for Qwen3 (used by /api/v1/transcribe/all as a candidate backend)
+  xiyu-qwen3:
+    <<: *xiyu-base
+    environment:
+      <<: *xiyu-env
+      ASR_BACKEND: qwen3
+      DEVICE: ${QWEN3_WRAPPER_DEVICE:-cpu}
+      NGPU: ${QWEN3_WRAPPER_NGPU:-0}
+      NCPU: ${QWEN3_WRAPPER_NCPU:-4}
+      QWEN3_ASR_BASE_URL: http://qwen3-asr:8000
+      QWEN3_ASR_MODEL: ${QWEN3_MODEL_ID:-Qwen/Qwen3-ASR-1.7B}
+      QWEN3_ASR_API_KEY: ${QWEN3_ASR_API_KEY:-EMPTY}
+      QWEN3_ASR_TIMEOUT_S: ${QWEN3_ASR_TIMEOUT_S:-60}
+    depends_on:
+      - qwen3-asr
+
+  # Local backends (internal-only)
+  xiyu-pytorch:
+    <<: *xiyu-base
+    environment:
+      <<: *xiyu-env
+      ASR_BACKEND: pytorch
+      DEVICE: ${PYTORCH_DEVICE:-cuda}
+      NGPU: ${PYTORCH_NGPU:-1}
+      NCPU: ${PYTORCH_NCPU:-4}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  xiyu-onnx:
+    build:
+      context: .
+      dockerfile: Dockerfile.onnx
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+    image: xiyu-speech-service:onnx
+    restart: unless-stopped
+    logging: *xiyu-logging
+    volumes:
+      - ./data:/app/data
+      - modelscope-cache:/root/.cache/modelscope
+      - huggingface-cache:/root/.cache/huggingface
+      - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
+      - onnx-cache:/root/.cache/funasr_onnx
+    environment:
+      <<: *xiyu-env
+      ASR_BACKEND: onnx
+      DEVICE: ${ONNX_DEVICE:-cpu}
+      NGPU: ${ONNX_NGPU:-0}
+      NCPU: ${ONNX_NCPU:-8}
+      OMP_NUM_THREADS: ${ONNX_NCPU:-8}
+      MKL_NUM_THREADS: ${ONNX_NCPU:-8}
+
+  xiyu-sensevoice:
+    <<: *xiyu-base
+    environment:
+      <<: *xiyu-env
+      ASR_BACKEND: sensevoice
+      DEVICE: ${SENSEVOICE_DEVICE:-cuda}
+      NGPU: ${SENSEVOICE_NGPU:-1}
+      NCPU: ${SENSEVOICE_NCPU:-4}
+      SENSEVOICE_MODEL: ${SENSEVOICE_MODEL:-iic/SenseVoiceSmall}
+      SENSEVOICE_LANGUAGE: ${SENSEVOICE_LANGUAGE:-zh}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  xiyu-whisper:
+    <<: *xiyu-base
+    environment:
+      <<: *xiyu-env
+      ASR_BACKEND: whisper
+      DEVICE: ${WHISPER_DEVICE:-cuda}
+      NGPU: ${WHISPER_NGPU:-1}
+      NCPU: ${WHISPER_NCPU:-4}
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-zh}
+      WHISPER_DOWNLOAD_ROOT: ${WHISPER_DOWNLOAD_ROOT:-/app/data/models/whisper}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8_float16}
+      WHISPER_VAD_FILTER: ${WHISPER_VAD_FILTER:-true}
+      WHISPER_VAD_MIN_SILENCE_DURATION_MS: ${WHISPER_VAD_MIN_SILENCE_DURATION_MS:-500}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # External diarizer (internal-only; default CPU to save VRAM)
   xiyu-diarizer:
     build:
       context: .
       dockerfile: Dockerfile.diarizer
     image: xiyu-diarizer:pyannote
-    profiles: ["diarizer"]
-    container_name: xiyu-diarizer
-    ports:
-      - "${PORT_DIARIZER:-8300}:8000"
+    restart: unless-stopped
+    logging: *xiyu-logging
     volumes:
       - huggingface-cache:/root/.cache/huggingface
     environment:
-      - HF_TOKEN=${HF_TOKEN:-}
-      - DEVICE=${DIARIZER_DEVICE:-cuda}
-      - DIARIZER_MODEL=${DIARIZER_MODEL:-pyannote/speaker-diarization-3.1}
-      - DIARIZER_WARMUP_ON_STARTUP=${DIARIZER_WARMUP_ON_STARTUP:-true}
-      - DIARIZER_NUM_SPEAKERS=${DIARIZER_NUM_SPEAKERS:-}
-      - DIARIZER_MIN_SPEAKERS=${DIARIZER_MIN_SPEAKERS:-}
-      - DIARIZER_MAX_SPEAKERS=${DIARIZER_MAX_SPEAKERS:-}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
+      <<: *proxy-env
+      HF_TOKEN: ${HF_TOKEN:-}
+      DEVICE: ${DIARIZER_DEVICE:-cpu}
+      DIARIZER_MODEL: ${DIARIZER_MODEL:-pyannote/speaker-diarization-3.1}
+      DIARIZER_WARMUP_ON_STARTUP: ${DIARIZER_WARMUP_ON_STARTUP:-true}
+      DIARIZER_NUM_SPEAKERS: ${DIARIZER_NUM_SPEAKERS:-}
+      DIARIZER_MIN_SPEAKERS: ${DIARIZER_MIN_SPEAKERS:-}
+      DIARIZER_MAX_SPEAKERS: ${DIARIZER_MAX_SPEAKERS:-}
 
-  xiyu:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: xiyu-speech-service:pytorch
-    container_name: xiyu-service
-    ports:
-      - "${PORT:-8000}:8000"
+  # ClearVoice denoise microservice (internal-only)
+  xiyu-clearvoice:
+    <<: *xiyu-base
     volumes:
       - ./data:/app/data
-      - model-cache:/root/.cache/modelscope
+      - ./data/models/clearvoice:/app/checkpoints
+      - modelscope-cache:/root/.cache/modelscope
       - huggingface-cache:/root/.cache/huggingface
-      # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise
-      # (used when `asr_options.preprocess.denoise_backend=clearvoice`).
       - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
     environment:
-      - DEVICE=${DEVICE:-cuda}
-      - NGPU=${NGPU:-1}
-      - NCPU=${NCPU:-4}
-      - DEBUG=${DEBUG:-false}
-      - HOTWORDS_THRESHOLD=${HOTWORDS_THRESHOLD:-0.85}
-      # ClearVoice (optional)
-      - CLEARVOICE_ENABLE=${CLEARVOICE_ENABLE:-true}
-      - CLEARVOICE_STUDIO_DIR=${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
-      - CLEARVOICE_MODEL=${CLEARVOICE_MODEL:-MossFormer2_48000Hz}
-      - CLEARVOICE_FORCE_CPU=${CLEARVOICE_FORCE_CPU:-true}
-      - CLEARVOICE_CHUNK_DURATION_S=${CLEARVOICE_CHUNK_DURATION_S:-30.0}
-      - CLEARVOICE_OVERLAP_DURATION_S=${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
-      # ClearVoice microservice (recommended)
-      - CLEARVOICE_SERVICE_BASE_URL=${CLEARVOICE_SERVICE_BASE_URL:-http://xiyu-clearvoice:8000}
-      - CLEARVOICE_SERVICE_TIMEOUT_S=${CLEARVOICE_SERVICE_TIMEOUT_S:-600.0}
-      - CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S=${CLEARVOICE_SERVICE_HEALTH_TIMEOUT_S:-2.0}
-      - SPEAKER_UNSUPPORTED_BEHAVIOR=${SPEAKER_UNSUPPORTED_BEHAVIOR:-ignore}
-      - SPEAKER_EXTERNAL_DIARIZER_ENABLE=${SPEAKER_EXTERNAL_DIARIZER_ENABLE:-false}
-      - SPEAKER_EXTERNAL_DIARIZER_BASE_URL=${SPEAKER_EXTERNAL_DIARIZER_BASE_URL:-http://xiyu-diarizer:8000}
-      - SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S=${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}
-      - SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
-      - SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}
+      <<: *proxy-env
+      DEVICE: ${CLEARVOICE_DEVICE:-cuda}
+      NGPU: ${CLEARVOICE_NGPU:-1}
+      NCPU: ${CLEARVOICE_NCPU:-4}
+      CLEARVOICE_ENABLE: ${CLEARVOICE_ENABLE:-true}
+      CLEARVOICE_STUDIO_DIR: ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
+      CLEARVOICE_MODEL: ${CLEARVOICE_MODEL:-MossFormer2_48000Hz}
+      CLEARVOICE_FORCE_CPU: ${CLEARVOICE_FORCE_CPU:-false}
+      CLEARVOICE_CHUNK_DURATION_S: ${CLEARVOICE_CHUNK_DURATION_S:-30.0}
+      CLEARVOICE_OVERLAP_DURATION_S: ${CLEARVOICE_OVERLAP_DURATION_S:-0.5}
+      CLEARVOICE_SERVICE_MAX_DURATION_S: ${CLEARVOICE_SERVICE_MAX_DURATION_S:-600.0}
+      CLEARVOICE_WARMUP_ON_STARTUP: ${CLEARVOICE_WARMUP_ON_STARTUP:-true}
+    command: ["python", "-m", "uvicorn", "src.clearvoice_service:app", "--host", "0.0.0.0", "--port", "8000"]
     deploy:
       resources:
         reservations:
@@ -127,13 +298,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
 
 volumes:
-  model-cache:
   huggingface-cache:
+  modelscope-cache:
+  onnx-cache:

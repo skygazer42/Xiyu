@@ -1,4 +1,4 @@
-# Multi-model deployment: each model/backend runs as its own Xiyu container,
+# (Legacy) Multi-model deployment: each model/backend runs as its own Xiyu container,
 # exposing the same Xiyu HTTP API on a different host port.
 #
 # This file is designed for *on-demand* startup via Compose profiles:

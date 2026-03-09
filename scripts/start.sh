@@ -2,7 +2,7 @@
 set -e
 
 MODE=${1:-gpu}
-PORT=${PORT:-8000}
+PORT=${PORT:-18200}
 
 echo "======================================"
 echo "Xiyu Speech Service Launcher"
@@ -11,11 +11,11 @@ echo "======================================"
 case $MODE in
     gpu)
         echo "Starting with GPU support..."
-        docker compose up -d
+        docker compose up -d --build
         ;;
     cpu)
-        echo "Starting with CPU only..."
-        docker compose -f docker-compose.cpu.yml up -d
+        echo "Starting with CPU only (legacy compose)..."
+        docker compose -f docker/compose/legacy/docker-compose.cpu.yml up -d --build
         ;;
     build)
         echo "Building Docker image..."
@@ -24,8 +24,8 @@ case $MODE in
     stop)
         echo "Stopping service..."
         docker compose down
-        docker compose -f docker-compose.cpu.yml down 2>/dev/null || true
-        docker compose -f docker-compose.models.yml down 2>/dev/null || true
+        docker compose -f docker/compose/legacy/docker-compose.cpu.yml down 2>/dev/null || true
+        docker compose -f docker/compose/legacy/docker-compose.models.yml down 2>/dev/null || true
         ;;
     logs)
         docker compose logs -f
@@ -38,10 +38,11 @@ case $MODE in
             echo "Tip: all-lite = all without GGUF (no extra local model artifacts required)"
             exit 1
         fi
+        echo "NOTE: models mode is legacy. Primary path is repo root docker-compose.yml (single entry)."
         echo "Starting model profile: ${PROFILE}"
 
         if [ "${PROFILE}" = "all-lite" ]; then
-            docker compose -f docker-compose.models.yml \
+            docker compose -f docker/compose/legacy/docker-compose.models.yml \
               --profile diarizer \
               --profile pytorch \
               --profile onnx \
@@ -50,7 +51,7 @@ case $MODE in
               --profile qwen3 \
               up -d
         else
-            docker compose -f docker-compose.models.yml --profile "${PROFILE}" up -d
+            docker compose -f docker/compose/legacy/docker-compose.models.yml --profile "${PROFILE}" up -d
         fi
 
         # Best-effort: print the expected endpoint for the selected profile.
@@ -63,7 +64,7 @@ case $MODE in
             diarizer) MODEL_PORT=${PORT_DIARIZER:-8300} ;;
             qwen3) MODEL_PORT=${PORT_XIYU_QWEN3:-8201} ;;
             vibevoice) MODEL_PORT=${PORT_XIYU_VIBEVOICE:-8202} ;;
-            router) MODEL_PORT=${PORT_XIYU_ROUTER:-8200} ;;
+            router) MODEL_PORT=${PORT_XIYU_ROUTER:-18200} ;;
             *) MODEL_PORT="" ;;
         esac
         if [ -n "${MODEL_PORT}" ]; then

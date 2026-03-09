@@ -2,11 +2,11 @@
 set -euo pipefail
 
 audio_path="${1:-}"
-base_url="${2:-${BASE_URL:-http://localhost:8200}}"
+base_url="${2:-${BASE_URL:-http://localhost:18200}}"
 
 if [[ -z "${audio_path}" ]]; then
   echo "Usage: $0 /path/to/meeting.wav [base_url]" >&2
-  echo "Example: $0 data/benchmark/test.wav http://localhost:8200" >&2
+  echo "Example: $0 data/benchmark/test.wav http://localhost:18200" >&2
   exit 2
 fi
 
@@ -29,4 +29,3 @@ curl -sS -X POST "${base_url}/api/v1/transcribe" \
   -F "apply_hotword=true" \
   -F "apply_llm=false" \
   -F "asr_options=${asr_options}"
-

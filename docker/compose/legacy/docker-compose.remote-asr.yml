@@ -1,4 +1,4 @@
-version: "3.8"
+version: "3.8"  # (Legacy) Remote ASR stack (Qwen3/VibeVoice + Router)
 
 x-proxy-env: &proxy-env
   # Optional proxy passthrough for model downloads inside containers.

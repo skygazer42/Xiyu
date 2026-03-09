@@ -8,7 +8,7 @@ REM   run_benchmark.bat nano                # 仅测试 Fun-ASR-Nano
 
 setlocal enabledelayedexpansion
 
-set COMPOSE_FILE=docker-compose.benchmark.yml
+set COMPOSE_FILE=docker/compose/legacy/docker-compose.benchmark.yml
 set BENCHMARK_DIR=data\benchmark
 
 REM 确保目录存在

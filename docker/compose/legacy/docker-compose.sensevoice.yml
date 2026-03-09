@@ -1,12 +1,16 @@
-version: '3.8'
+version: '3.8'  # (Legacy) SenseVoice-only single-container variant
+
+# SenseVoice 后端部署配置
+# 使用 SenseVoice 进行超高速推理
+# 10秒音频仅需 70ms，比 Whisper-Large 快 15 倍
 
 services:
-  xiyu:
+  xiyu-sensevoice:
     build:
       context: .
       dockerfile: Dockerfile
-    image: xiyu-speech-service:cpu
-    container_name: xiyu-service-cpu
+    image: xiyu-speech-service:sensevoice
+    container_name: xiyu-service-sensevoice
     ports:
       - "${PORT:-8000}:8000"
     volumes:
@@ -16,9 +20,15 @@ services:
       # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise
       - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
     environment:
-      - DEVICE=cpu
-      - NGPU=0
-      - NCPU=${NCPU:-8}
+      # 后端配置
+      - ASR_BACKEND=sensevoice
+      - SENSEVOICE_MODEL=${SENSEVOICE_MODEL:-iic/SenseVoiceSmall}
+      - SENSEVOICE_LANGUAGE=${SENSEVOICE_LANGUAGE:-zh}
+      # 设备配置
+      - DEVICE=${DEVICE:-cuda}
+      - NGPU=${NGPU:-1}
+      - NCPU=${NCPU:-4}
+      # 通用配置
       - DEBUG=${DEBUG:-false}
       - HOTWORDS_THRESHOLD=${HOTWORDS_THRESHOLD:-0.85}
       # ClearVoice (optional)
@@ -34,12 +44,25 @@ services:
       - SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S=${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 volumes:
   model-cache:

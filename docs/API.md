@@ -32,7 +32,7 @@ Xiyu 是一个高性能的中文语音转写服务，支持：
 > 说明：Qwen3 / VibeVoice 在本项目中通常以“远程 ASR + Xiyu wrapper”的方式部署。
 > 也就是说，真正提供 Xiyu API 的是 `xiyu-qwen3` / `xiyu-vibevoice` 容器；而 `qwen3-asr` / `vibevoice-asr` 是 OpenAI-compatible 服务端。
 
-**基础URL**: `http://localhost:8000`
+**基础URL**: `http://localhost:18200`
 
 ---
 
@@ -297,7 +297,7 @@ Content-Type: multipart/form-data
 **cURL 示例**:
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/transcribe" \
+curl -X POST "http://localhost:18200/api/v1/transcribe" \
   -F "file=@audio.wav" \
   -F "with_speaker=true" \
   -F "apply_hotword=true"
@@ -468,7 +468,7 @@ Content-Type: multipart/form-data
 **cURL 示例**:
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/trans/url" \
+curl -X POST "http://localhost:18200/api/v1/trans/url" \
   -F "audio_url=https://example.com/audio.mp3" \
   -F "with_speaker=false" \
   -F "apply_hotword=true"
@@ -907,7 +907,7 @@ POST /config/reload
 ### 连接
 
 ```
-WebSocket ws://localhost:8000/ws/realtime
+WebSocket ws://localhost:18200/ws/realtime
 ```
 
 ### 消息格式
@@ -1007,7 +1007,7 @@ WebSocket ws://localhost:8000/ws/realtime
 ### 使用示例
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/ws/realtime');
+const ws = new WebSocket('ws://localhost:18200/ws/realtime');
 
 ws.onopen = () => {
   // 发送配置

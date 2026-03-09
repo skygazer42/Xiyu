@@ -1,51 +1,27 @@
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { useQuery, useQueries } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useBackendStore, useTranscriptionStore } from '@/stores'
-import { getBackendInfo, getBackendTargets, probeBackendInfo } from '@/lib/api'
+import { getBackendInfo, getBackendTargets } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Sparkles, Users, BookText, Bot, Server, Braces, ChevronDown } from 'lucide-react'
 
-function _formatHostWithPort(hostname: string, port: number): string {
-  const h = String(hostname || '').trim() || 'localhost'
-  // IPv6 literal needs brackets for URL host.
-  const host = h.includes(':') && !h.startsWith('[') ? `[${h}]` : h
-  return `${host}:${port}`
+function _defaultCustomBaseUrl(): string {
+  if (typeof window === 'undefined') return ''
+  return String(window.location.origin || '').trim()
 }
-
-function _makePresetBaseUrl(port: number): string {
-  if (typeof window === 'undefined') {
-    return `http://${_formatHostWithPort('localhost', port)}`
-  }
-  const protocol = String(window.location.protocol || 'http:') || 'http:'
-  const hostname = String(window.location.hostname || 'localhost') || 'localhost'
-  return `${protocol}//${_formatHostWithPort(hostname, port)}`
-}
-
-const PRESET_BACKENDS: Array<{ label: string; value: string; baseUrl: string }> = [
-  // Radix Select `value` must be non-empty, so we use a sentinel for relative baseUrl.
-  { label: '当前服务 (相对路径)', value: '__relative__', baseUrl: '' },
-  { label: 'PyTorch (8101)', value: _makePresetBaseUrl(8101), baseUrl: _makePresetBaseUrl(8101) },
-  { label: 'ONNX (8102)', value: _makePresetBaseUrl(8102), baseUrl: _makePresetBaseUrl(8102) },
-  { label: 'SenseVoice (8103)', value: _makePresetBaseUrl(8103), baseUrl: _makePresetBaseUrl(8103) },
-  { label: 'GGUF (8104)', value: _makePresetBaseUrl(8104), baseUrl: _makePresetBaseUrl(8104) },
-  { label: 'Whisper (8105)', value: _makePresetBaseUrl(8105), baseUrl: _makePresetBaseUrl(8105) },
-  { label: 'Qwen3 (8201)', value: _makePresetBaseUrl(8201), baseUrl: _makePresetBaseUrl(8201) },
-  { label: 'VibeVoice (8202)', value: _makePresetBaseUrl(8202), baseUrl: _makePresetBaseUrl(8202) },
-  { label: 'Router (8200)', value: _makePresetBaseUrl(8200), baseUrl: _makePresetBaseUrl(8200) },
-]
 
 const ROUTER_TARGETS: Array<{ label: string; value: string }> = [
   { label: '自动 (Router 策略)', value: 'auto' },
   { label: 'Qwen3 (远程)', value: 'qwen3' },
-  { label: 'VibeVoice (远程)', value: 'vibevoice' },
   { label: 'PyTorch (内网容器)', value: 'pytorch' },
   { label: 'ONNX (内网容器)', value: 'onnx' },
   { label: 'SenseVoice (内网容器)', value: 'sensevoice' },
@@ -70,20 +46,14 @@ export function TranscribeOptions() {
   } = useTranscriptionStore()
   const { baseUrl, setBaseUrl } = useBackendStore()
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [backendSelectOpen, setBackendSelectOpen] = useState(false)
   const [routerTargetSelectOpen, setRouterTargetSelectOpen] = useState(false)
 
-  const backendOptions = useMemo(() => {
-    if (!baseUrl || PRESET_BACKENDS.some((b) => b.value === baseUrl)) {
-      return PRESET_BACKENDS
-    }
-    return [{ label: `自定义: ${baseUrl}`, value: baseUrl, baseUrl }, ...PRESET_BACKENDS]
+  const [baseUrlDraft, setBaseUrlDraft] = useState(baseUrl)
+  useEffect(() => {
+    setBaseUrlDraft(baseUrl)
   }, [baseUrl])
 
-  const selectedBackendValue = useMemo(() => {
-    const hit = backendOptions.find((b) => b.baseUrl === baseUrl)
-    return hit?.value || '__relative__'
-  }, [backendOptions, baseUrl])
+  const backendMode = baseUrl ? 'custom' : 'relative'
 
   const backendInfoQuery = useQuery({
     queryKey: ['backendInfo', baseUrl],
@@ -101,37 +71,6 @@ export function TranscribeOptions() {
     retry: false,
     staleTime: 0,
   })
-
-  const backendProbeQueries = useQueries({
-    queries: backendOptions.map((b) => ({
-      queryKey: ['backendProbe', b.baseUrl || '__relative__'],
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        probeBackendInfo(b.baseUrl, { timeoutMs: 1500, signal }),
-      enabled: backendSelectOpen,
-      retry: false,
-      staleTime: 0,
-    })),
-  })
-
-  const getProbeStatus = (idx: number): 'ok' | 'loading' | 'error' | 'idle' => {
-    const q = backendProbeQueries[idx]
-    if (!backendSelectOpen) return 'idle'
-    if (q.isPending) return 'loading'
-    if (q.isError) return 'error'
-    if (q.isSuccess) return 'ok'
-    return 'idle'
-  }
-
-  const getProbeLabel = (idx: number): string => {
-    const q = backendProbeQueries[idx]
-    if (q.isSuccess) {
-      const name = String((q.data?.info as Record<string, unknown> | undefined)?.name || q.data?.backend || '')
-      return name ? `可用 · ${name}` : '可用'
-    }
-    if (q.isPending) return '探测中'
-    if (q.isError) return '不可用'
-    return ''
-  }
 
   const supportsSpeaker = backendInfoQuery.data?.capabilities.supports_speaker
   const supportsSpeakerFallback = backendInfoQuery.data?.capabilities.supports_speaker_fallback
@@ -215,7 +154,7 @@ export function TranscribeOptions() {
             <Server className="h-5 w-5 text-muted-foreground" />
             <div className="flex-1">
               <Label htmlFor="backend" className="text-base">后端</Label>
-              <p className="text-sm text-muted-foreground">选择本次转写使用的服务地址</p>
+              <p className="text-sm text-muted-foreground">单端口部署默认使用「当前服务（相对路径）」</p>
             </div>
             {backendInfoQuery.isLoading ? (
               <Badge variant="outline">探测中</Badge>
@@ -265,43 +204,61 @@ export function TranscribeOptions() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="backend">快速选择</Label>
+            <Label htmlFor="backend">服务地址</Label>
             <Select
-              value={selectedBackendValue}
-              onOpenChange={setBackendSelectOpen}
+              value={backendMode}
               onValueChange={(value) => {
-                const hit = backendOptions.find((b) => b.value === value)
-                const nextBaseUrl = hit ? hit.baseUrl : value
-                setBaseUrl(nextBaseUrl)
+                if (value === 'relative') {
+                  setBaseUrl('')
+                  setBaseUrlDraft('')
+                  return
+                }
+                const next = (baseUrlDraft || '').trim() || _defaultCustomBaseUrl()
+                setBaseUrlDraft(next)
+                setBaseUrl(next)
               }}
             >
               <SelectTrigger id="backend">
-                <SelectValue placeholder="选择后端..." />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {backendOptions.map((b, idx) => (
-                  <SelectItem key={b.value} value={b.value}>
-                    <span className="flex w-full items-center justify-between gap-2">
-                      <span className="truncate">{b.label}</span>
-                      {backendSelectOpen ? (
-                        <span
-                          className={cn(
-                            'text-xs',
-                            getProbeStatus(idx) === 'ok'
-                              ? 'text-green-700 dark:text-green-400'
-                              : getProbeStatus(idx) === 'error'
-                                ? 'text-red-700 dark:text-red-400'
-                                : 'text-muted-foreground'
-                          )}
-                        >
-                          {getProbeLabel(idx)}
-                        </span>
-                      ) : null}
-                    </span>
-                  </SelectItem>
-                ))}
+                <SelectItem value="relative">当前服务 (相对路径 · 推荐)</SelectItem>
+                <SelectItem value="custom">自定义地址</SelectItem>
               </SelectContent>
             </Select>
+
+            {backendMode === 'custom' ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={baseUrlDraft}
+                    onChange={(e) => setBaseUrlDraft(e.target.value)}
+                    placeholder={_defaultCustomBaseUrl() || 'http://<server-ip>:18200'}
+                    spellCheck={false}
+                    inputMode="url"
+                    autoComplete="off"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        setBaseUrl(baseUrlDraft)
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setBaseUrl(baseUrlDraft)}
+                    disabled={!baseUrlDraft.trim()}
+                  >
+                    应用
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  说明：仅当你把前端单独部署在其它域名/端口（需要 CORS）时，才需要自定义；否则保持相对路径更稳。
+                </p>
+              </div>
+            ) : null}
 
             <p className="text-xs text-muted-foreground">
               当前 API：{baseUrl ? baseUrl : '相对路径（同源部署）'}

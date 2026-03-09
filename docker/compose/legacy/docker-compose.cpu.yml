@@ -1,16 +1,12 @@
-version: '3.8'
-
-# ONNX 后端部署配置
-# 使用 ONNX Runtime 进行高性能推理
-# 适用于 CPU 部署，性能提升 2-10x
+version: '3.8'  # (Legacy) CPU-only single-container variant
 
 services:
-  xiyu-onnx:
+  xiyu:
     build:
       context: .
-      dockerfile: Dockerfile.onnx
-    image: xiyu-speech-service:onnx
-    container_name: xiyu-service-onnx
+      dockerfile: Dockerfile
+    image: xiyu-speech-service:cpu
+    container_name: xiyu-service-cpu
     ports:
       - "${PORT:-8000}:8000"
     volumes:
@@ -19,15 +15,10 @@ services:
       - huggingface-cache:/root/.cache/huggingface
       # Optional: mount a local ClearerVoice-Studio checkout for ClearVoice denoise
       - ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}:ro
-      - onnx-cache:/root/.cache/funasr_onnx
     environment:
-      # 后端配置
-      - ASR_BACKEND=onnx
-      - ONNX_QUANTIZE=${ONNX_QUANTIZE:-true}
-      # 设备配置 (ONNX 主要优化 CPU 推理)
-      - DEVICE=${DEVICE:-cpu}
+      - DEVICE=cpu
+      - NGPU=0
       - NCPU=${NCPU:-8}
-      # 通用配置
       - DEBUG=${DEBUG:-false}
       - HOTWORDS_THRESHOLD=${HOTWORDS_THRESHOLD:-0.85}
       # ClearVoice (optional)
@@ -43,23 +34,13 @@ services:
       - SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S=${SPEAKER_EXTERNAL_DIARIZER_TIMEOUT_S:-60}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURNS:-200}
       - SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S=${SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S:-25}
-      # ONNX Runtime 优化
-      - OMP_NUM_THREADS=${NCPU:-8}
-      - MKL_NUM_THREADS=${NCPU:-8}
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
         max-file: "3"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s  # ONNX 模型首次加载需要更多时间
 
 volumes:
   model-cache:
   huggingface-cache:
-  onnx-cache:

@@ -22,7 +22,7 @@ fi
 mkdir -p "${out_dir}"
 
 declare -a targets=(
-  "router 8200"
+  "router 18200"
   "pytorch 8101"
   "onnx 8102"
   "sensevoice 8103"
@@ -94,7 +94,7 @@ done
 
 echo ""
 
-ensemble_port="8200"
+ensemble_port="18200"
 if ! is_healthy "${ensemble_port}"; then
   ensemble_port="8101"
 fi
@@ -118,10 +118,9 @@ if is_healthy "${ensemble_port}"; then
     fail_count=$((fail_count + 1))
   fi
 else
-  echo "[$(date +%H:%M:%S)] skip ensemble - no backend reachable (ports 8200/8101)"
+  echo "[$(date +%H:%M:%S)] skip ensemble - no backend reachable (ports 18200/8101)"
   skip_count=$((skip_count + 1))
 fi
 
 echo ""
 echo "[done] ok=${ok_count} skip=${skip_count} fail=${fail_count} out_dir=${out_dir}"
-

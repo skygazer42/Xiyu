@@ -1,338 +1,141 @@
-# 多模型 / 多后端部署指南（profiles / 端口 / 说话人策略）
+# 多模型 / 多后端说明
 
-本项目支持“**一个模型/后端 = 一个 Xiyu 服务实例**”的部署方式：每个实例都提供 **同一套 Xiyu HTTP API**（例如 `/api/v1/transcribe`），只是端口不同。
+当前仓库的推荐部署已经收敛为“单入口 + 内部多后端”：
 
-这样你可以：
+- 推荐 compose: 根目录 `docker-compose.yml`
+- 唯一默认对外端口: `18200`
+- 公开入口: `xiyu-router`
 
-- 同一份前端 UI，通过切换「后端（快速选择）」做 A/B 对比
-- 会议 / 视频 / 电话会议按需选择：快 / 准 / 低资源 / 支持 speaker
+因此，大多数场景下你不需要再直接暴露 `810x / 820x / 8300 / 8400 / 900x` 这些端口。
 
-> 从 0 开始的部署请先看 `docs/DEPLOYMENT.md`。  
-> 常见问题排障请看 `docs/TROUBLESHOOTING.md`。  
-> API 细节请看 `docs/API.md`（或访问任意后端的 `/docs`）。
+## 1. 推荐形态
 
----
-
-## 0) TL;DR（常用命令）
+### 单入口 router 栈
 
 ```bash
-# 政务会议推荐（不启 VibeVoice）：一键启动（Router 单端口 + 常用后端 + 降噪 + 说话人）
-./scripts/bootstrap_gov_meeting.sh
-
-# 启动“全家桶”（含 Qwen3 + VibeVoice；不含 router；会拉取/启动 vllm/vllm-openai 大镜像）
-docker compose -f docker-compose.models.yml --profile all up -d
-
-# 只启动 PyTorch（建议会议）
-docker compose -f docker-compose.models.yml --profile pytorch up -d
-
-# 停止
-docker compose -f docker-compose.models.yml down
+cp .env.example .env
+docker compose up -d --build
 ```
 
----
+访问：
 
-## 1) 两种部署形态：单容器 vs 多模型端口
+- `http://<server-ip>:18200`
 
-### 1.1 单容器（入门最简单）
+特点：
 
-使用根目录的 `docker-compose.yml`（或 `docker-compose.cpu.yml`）启动一个 Xiyu：
+- Web UI 和 API 都通过 `18200` 访问
+- Router 负责在内部转发到 Qwen3 / PyTorch / ONNX / SenseVoice / Whisper 等容器
+- diarizer 与 ClearVoice 默认作为内部微服务存在
 
-- 优点：最省心，UI/API 都在 `:8000`
-- 缺点：想切换模型要改 env 或换 compose 文件
+## 2. 为什么还保留“多模型端口”？
 
-### 1.2 多模型端口（推荐：对比/压测/多场景共存）
+legacy 多端口部署仍然有用，主要用于：
 
-使用 `docker-compose.models.yml`：
+- A/B 对比
+- 模型专项压测
+- 某个后端单独排障
+- 某些环境下按后端拆分暴露
 
-- 每个后端一个容器（每个容器一个端口）
-- API 路径一致，适合前端做“后端选择器”
+这些 compose 文件已经移到：
 
----
+- `docker/compose/legacy/docker-compose.models.yml`
+- `docker/compose/legacy/docker-compose.remote-asr.yml`
+- `docker/compose/legacy/docker-compose.cpu.yml`
+- `docker/compose/legacy/docker-compose.onnx.yml`
+- `docker/compose/legacy/docker-compose.sensevoice.yml`
 
-## 1.3 政务会议推荐栈（不启 VibeVoice，默认对外只开 Router）
+## 3. Legacy models compose 用法
 
-适用场景：
-- 3–4 小时会议长音频
-- 需要 **说话人**（external diarizer）
-- 需要 **降噪**（ClearVoice，默认 `MossFormer2_48000Hz`）
-- 你们明确 **不启用 VibeVoice**
-
-推荐直接用一键脚本（会自动创建 `.env`、构建镜像、启动必要容器，并尽量触发模型下载/预热）：
+### 启动单个 profile
 
 ```bash
-./scripts/bootstrap_gov_meeting.sh
+docker compose -f docker/compose/legacy/docker-compose.models.yml --profile pytorch up -d
+docker compose -f docker/compose/legacy/docker-compose.models.yml --profile whisper up -d
+docker compose -f docker/compose/legacy/docker-compose.models.yml --profile qwen3 up -d
 ```
 
-等价的 Compose 命令（不使用脚本时）：
+### 启动 router profile
 
 ```bash
-docker compose -f docker-compose.models.yml \
-  --profile router \
-  --profile qwen3 \
-  --profile diarizer \
-  --profile clearvoice \
-  --profile pytorch \
-  --profile onnx \
-  --profile sensevoice \
-  --profile whisper \
-  up -d --build
+PORT_XIYU_ROUTER=18200 \
+docker compose -f docker/compose/legacy/docker-compose.models.yml --profile router up -d
 ```
 
-访问入口（默认）：
-- Web UI + API：`http://<server-ip>:8200`（`PORT_XIYU_ROUTER`）
+如果你使用 legacy router，也建议继续把公开入口保持为 `18200`。
 
-端口暴露建议（生产强烈推荐）：
-- 公司内网只放行 `8200`
-- 其余 `810x/820x/8300/8400/9001` 端口仅 Docker 内部互通即可
-
----
-
-## 2) Profile 用法（按需启动）
-
-`docker-compose.models.yml` 通过 Compose profiles 做“按需启动”。
-
-### 2.1 启动单个 profile
+### 停止
 
 ```bash
-docker compose -f docker-compose.models.yml --profile pytorch up -d
-docker compose -f docker-compose.models.yml --profile whisper up -d
-docker compose -f docker-compose.models.yml --profile qwen3 up -d
+docker compose -f docker/compose/legacy/docker-compose.models.yml down
 ```
 
-### 2.2 一键启动常用“全家桶”
+## 4. Legacy 端口对照
 
-```bash
-# 包含：diarizer + pytorch + onnx + sensevoice + gguf + whisper + qwen3 + vibevoice
-# 不包含：router（可选；如需统一入口可再启用 --profile router）
-docker compose -f docker-compose.models.yml --profile all up -d
-```
+这些端口是 legacy 直连端口，不是推荐的默认公开入口：
 
-### 2.3 启动 VibeVoice / Router（vLLM 远程模型容器 + Xiyu 包装）
+| 端口 | 服务 | 说明 |
+|------|------|------|
+| `18200` | `xiyu-router` | 推荐公开入口 |
+| `8101` | `xiyu-pytorch` | PyTorch |
+| `8102` | `xiyu-onnx` | ONNX |
+| `8103` | `xiyu-sensevoice` | SenseVoice |
+| `8104` | `xiyu-gguf` | GGUF |
+| `8105` | `xiyu-whisper` | Whisper |
+| `8201` | `xiyu-qwen3` | Qwen3 wrapper |
+| `8202` | `xiyu-vibevoice` | VibeVoice wrapper |
+| `8300` | `xiyu-diarizer` | external diarizer |
+| `8400` | `xiyu-clearvoice` | ClearVoice |
+| `9001` | `qwen3-asr` | 远程 ASR server |
+| `9002` | `vibevoice-asr` | 远程 ASR server |
 
-`vibevoice-asr` 容器使用官方 `vllm/vllm-openai` 镜像启动 vLLM 服务，需要一份包含 `vllm_plugin` 的 VibeVoice 源码目录。
+内部容器端口仍然是 `8000`，那是容器内监听端口，不是宿主机推荐公开端口。
 
-为了适配“内网/离线环境 GitHub 不可用”的情况，本仓库默认已内置一份 **最小 VibeVoice 源码快照**：
+## 5. 前端如何切后端
 
-- `./third_party/VibeVoice/`（包含 `pyproject.toml`、`vibevoice/`、`vllm_plugin/`）
-- `docker-compose.models.yml` 默认会把它挂载到容器 `/app`
+### 推荐方式
 
-因此 **一般不需要你再手动 `git clone`**。
+- 打开 `http://<server-ip>:18200`
+- 在前端里保持 `当前服务 (相对路径)`
+- 通过 router 的目标模型选择内部后端
 
-启动：
+### legacy 直连方式
 
-```bash
-# 可选：提前 pull 镜像（网络慢时建议）
-docker pull vllm/vllm-openai:latest
+如果你确实在做 A/B 测试，可以把前端切到：
 
-# 启动 VibeVoice wrapper（会同时启动 vibevoice-asr）
-docker compose -f docker-compose.models.yml --profile vibevoice up -d
-```
+- `http://<server-ip>:8101`
+- `http://<server-ip>:8102`
+- `http://<server-ip>:8201`
 
-如果你希望使用最新版/官方仓库（或你们内网 mirror），可以自行准备并覆盖挂载路径：
+但这不是默认对外交付方式。
 
-```bash
-# 推荐：浅克隆 + 强制 HTTP/1.1（可规避 GitHub HTTP/2 early EOF）
-git -c http.version=HTTP/1.1 clone --depth 1 https://github.com/microsoft/VibeVoice.git ./VibeVoice
+## 6. VibeVoice / GGUF 补充
 
-VIBEVOICE_REPO_PATH=./VibeVoice \
-  docker compose -f docker-compose.models.yml --profile vibevoice up -d
-```
+### VibeVoice
 
-说明：
-- 首次启动会在 `vibevoice-asr` 容器内自动下载模型权重（默认 `microsoft/VibeVoice-ASR`）；默认优先从 ModelScope 下载，失败再回退 HuggingFace；缓存到 `huggingface-cache` / `model-cache` volume。
-- 观察启动/下载进度：`docker logs -f vibevoice-asr`
-- wrapper 入口：`http://localhost:8202`（Xiyu API/UI）；vLLM server 端口：`http://localhost:9002`（仅调试用）
+VibeVoice 的最小源码快照已经随仓库放在：
 
-停止：
+- `third_party/VibeVoice/`
 
-```bash
-docker compose -f docker-compose.models.yml down
-```
+legacy compose 默认会挂载这份目录。
 
----
+### GGUF
 
-### 2.4 启动 GGUF（需要本地模型文件）
-
-GGUF 后端适合“离线/本地 CPU”使用，但它 **不会自动下载模型**（不是标准 HF/ModelScope 模型仓库结构，需要你准备本地文件）。
-
-默认期望你在项目根目录准备：
+GGUF 仍然需要你准备本地模型文件：
 
 ```text
 ./data/models/Fun-ASR-Nano-GGUF/
-  Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx
+  Fun-ASR-Nano-Encoder-Adaptor.int8.onnx
   Fun-ASR-Nano-CTC.int8.onnx
   Fun-ASR-Nano-Decoder.q8_0.gguf
   tokens.txt
 ```
 
-说明：
-- Docker 的 GGUF 镜像会在构建时编译并内置 llama.cpp 动态库到 `/app/llama_cpp/lib`（默认 `GGUF_LIB_DIR` 指向该目录），所以 **不需要**你在宿主机额外放 `.so`。
-- 如果你希望使用自定义的 llama.cpp 编译产物，可设置 `GGUF_LIB_DIR=/app/data/models/bin` 并把 `.so` 放到宿主机 `./data/models/bin/`。
-- 当前仓库已内置 `./third_party/llama.cpp/`（llama.cpp 源码快照），用于 GGUF 镜像构建时编译动态库，一般不需要额外 clone。若你希望升级/替换版本，仍可按 `docs/TROUBLESHOOTING.md` 的 2.7 指引自行准备并覆盖该目录。
+## 7. 说话人策略
 
-这些路径都可以通过 `docker-compose.models.yml` 的 `GGUF_*` 环境变量覆盖。
+推荐会议场景：
 
-启动：
+- 优先开启 external diarizer
+- 在单入口下通过 `18200` 访问 router
+- 让 router 内部转发，避免终端用户记多个端口
 
-```bash
-docker compose -f docker-compose.models.yml --profile gguf up -d --build
-docker logs -f xiyu-gguf
-```
-
-如果你在 `--build` 阶段遇到 `pip install` 下载失败（例如 “Network is unreachable / Could not install packages”），请看 `docs/TROUBLESHOOTING.md` 的 **2.8**，并在 `.env` 设置 `PIP_INDEX_URL/PIP_TRUSTED_HOST`。
-
-## 3) 端口对照表（默认值）
-
-默认端口可在 `.env` 中覆盖；下表为 `.env.example` 默认值：
-
-| 服务 | Profile | 默认端口 | 说明 |
-|---|---|---:|---|
-| `xiyu-pytorch` | `pytorch` / `all` | `8101` | FunASR PyTorch（建议会议） |
-| `xiyu-onnx` | `onnx` / `all` | `8102` | ONNX（默认 CPU） |
-| `xiyu-sensevoice` | `sensevoice` / `all` | `8103` | SenseVoice（GPU） |
-| `xiyu-gguf` | `gguf` / `all` | `8104` | GGUF（默认 CPU；需要你准备模型文件） |
-| `xiyu-whisper` | `whisper` / `all` | `8105` | Whisper（GPU，默认 `large`） |
-| `xiyu-diarizer` | `diarizer` / `all` | `8300` | external diarizer（pyannote） |
-| `qwen3-asr` | `qwen3` / `router` / `all` | `9001` | 远程 ASR server（OpenAI transcription 风格） |
-| `vibevoice-asr` | `vibevoice` / `router` / `all` | `9002` | 远程 ASR server（vLLM OpenAI-compatible） |
-| `xiyu-qwen3` | `qwen3` / `all` | `8201` | Qwen3 wrapper（提供 Xiyu API） |
-| `xiyu-vibevoice` | `vibevoice` / `all` | `8202` | VibeVoice wrapper（提供 Xiyu API） |
-| `xiyu-router` | `router` | `8200` | 路由后端（提供 Xiyu API；不是必须） |
-
-每个 Xiyu 实例的常用入口：
-
-- Web UI：`http://localhost:<port>`
-- API Docs：`http://localhost:<port>/docs`
-- Health：`http://localhost:<port>/health`
-
----
-
-## 4) 前端怎么切后端（快速选择）
-
-每个 Xiyu 容器都内置相同的前端 UI（只要镜像包含 `frontend/dist`）。
-
-建议：
-
-1) 打开任意一个端口的 UI（例如 `http://<server-host>:8101`）  
-2) 在「转写选项 → 后端 → 快速选择」里切换后端（例如 `Whisper (8105)` / `Qwen3 (8201)` / `Router (8200)`）  
-3) 前端会把请求发到你选择的端口
-
-> 提示：前端的“快速选择”预设会自动使用**当前页面的域名/IP**拼出 `:<port>`（不再固定 `localhost`），因此更适合“服务器部署后，同事从公司网访问”的场景。
->
-> 如果你是“公司内网只开放 1 个端口”的部署方式（推荐 router），请在 UI 里选择「当前服务 (相对路径)」，让所有请求都打到当前端口（不依赖其它后端端口对外可达）。
-
----
-
-## 5) 权重缓存策略（不会把镜像撑大）
-
-原则：
-
-- **权重下载到 volume 或宿主机挂载目录**，避免写进镜像层
-- 重启容器不会重复下载
-
-`docker-compose.models.yml` 主要使用这些缓存：
-
-- `model-cache`：ModelScope 缓存（FunASR）
-- `huggingface-cache`：HuggingFace 缓存（pyannote / Qwen3 / VibeVoice 等）
-- `onnx-cache`：ONNX 缓存（ONNX 后端）
-- 宿主机 `./data:/app/data`：
-  - Whisper 默认下载到 `./data/models/whisper`
-
-查看 volumes：
-
-```bash
-docker volume ls | rg "model-cache|huggingface-cache|onnx-cache"
-```
-
-清理缓存（谨慎：会导致下次启动重新下载）：
-
-```bash
-docker compose -f docker-compose.models.yml down
-docker volume rm xiyu_model-cache xiyu_huggingface-cache  # 名称以 docker volume ls 为准
-```
-
----
-
-## 6) 说话人（speaker）从哪里来？（会议场景关键）
-
-会议转写想要输出：
-
-```
-说话人1：...
-说话人2：...
-```
-
-Xiyu 支持三种策略（推荐顺序）：
-
-### 6.1 External diarizer（推荐：任意后端都能输出 `speaker_turns`）
-
-启用 `xiyu-diarizer`（pyannote）后，Xiyu 会：
-
-1) diarizer 先把音频切成 speaker turns  
-2) Xiyu 再逐段调用你选择的 ASR 后端  
-3) 输出 `speaker_turns`，并可格式化为 `说话人1/2/3...`
-
-启动示例（Qwen3 wrapper + external diarizer）：
-
-```bash
-HF_TOKEN=... \
-SPEAKER_EXTERNAL_DIARIZER_ENABLE=true \
-  docker compose -f docker-compose.models.yml --profile diarizer --profile qwen3 up -d
-```
-
-> 注意：部分 pyannote 模型需要在 HuggingFace 申请访问权限，并提供 `HF_TOKEN`。
-
-### 6.2 后端原生 speaker（最简单）
-
-当后端本身支持 speaker 时，请求里带：
-
-- `with_speaker=true`
-- （可选）`asr_options.speaker.label_style="numeric"`
-
-### 6.3 Fallback diarization（兼容：Qwen3/Whisper 这类不带 speaker 的后端）
-
-Qwen3-ASR、Whisper 等常见转写服务 **不原生输出 speaker**。
-
-你可以让 Xiyu 额外调用一个“辅助 Xiyu 服务”（通常是 `xiyu-pytorch`）生成分段信息：
-
-- 同时启动 `--profile pytorch` 和 `--profile qwen3`
-- 并设置：
-  - `SPEAKER_FALLBACK_DIARIZATION_ENABLE=true`
-  - `SPEAKER_FALLBACK_DIARIZATION_BASE_URL=http://xiyu-pytorch:8000`
-
-失败会自动降级为普通转写（避免破坏“端口=模型”的预期）。
-
----
-
-## 7) 远程 ASR：Qwen3 / VibeVoice 的两层结构
-
-### 7.1 Qwen3-ASR（`qwen3-asr` + `xiyu-qwen3`）
-
-`--profile qwen3` 会启动：
-
-1) `qwen3-asr`：OpenAI transcription server（吃 GPU）  
-2) `xiyu-qwen3`：Xiyu wrapper（提供统一 Xiyu API；一般 CPU 即可）
-
-常用配置（`.env`）：
-
-- `QWEN3_MODEL_ID`（默认 `Qwen/Qwen3-ASR-0.6B`）
-- `QWEN3_MAX_MODEL_LEN`（`docker-compose.models.yml` 默认 `16384`；显存紧张时可继续调小）
-- `QWEN3_GPU_MEMORY_UTILIZATION`
-
-### 7.2 VibeVoice-ASR（`vibevoice-asr` + `xiyu-vibevoice`）
-
-同理：
-
-1) `vibevoice-asr`：vLLM OpenAI-compatible server（吃 GPU）  
-2) `xiyu-vibevoice`：Xiyu wrapper（提供统一 Xiyu API）
-
-> VibeVoice 默认使用仓库内置的 `./third_party/VibeVoice` 快照挂载进容器（无需额外 clone）。  
-> 如需使用你自己的 repo/mirror，再设置 `VIBEVOICE_REPO_PATH` 覆盖挂载路径（详见 `docker-compose.models.yml` 注释）。
-
----
-
-## 8) 常用组合推荐（会议）
-
-1) **稳/省心**：`pytorch` + `diarizer`（external diarizer）  
-2) **多模型对比**：`--profile all` + 前端「转写选项 → 后端 → 快速选择」切端口  
-3) **远程 ASR + speaker**：`qwen3` + `diarizer`（或 `qwen3` + fallback diarization）
+如果你正在排查某个后端的 speaker 行为，再临时直连对应 legacy 端口。

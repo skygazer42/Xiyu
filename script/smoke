@@ -10,7 +10,7 @@ set -euo pipefail
 #   ./script/smoke
 #
 # Optional env:
-#   PORTS="8200 8101 ..."           Override detected ports
+#   PORTS="18200 8101 ..."          Override detected ports
 #   DIARIZER_PORT=8300              Override diarizer detection (set empty to skip)
 #   REMOTE_ASR_PORTS="9001 9002"    Override remote ASR ports for /v1/models readiness checks
 #   SKIP_REMOTE_ASR_CHECKS=true     Skip remote readiness even if ports are set
@@ -25,7 +25,7 @@ _is_healthy() {
 
 _detect_ports() {
   local detected=()
-  local candidates=(8200 8101 8102 8103 8104 8105 8201 8202)
+  local candidates=(18200 8101 8102 8103 8104 8105 8201 8202)
   for p in "${candidates[@]}"; do
     if _is_healthy "${p}"; then
       detected+=("${p}")
@@ -47,7 +47,7 @@ if [ -z "${DIARIZER_PORT-}" ]; then
 fi
 
 if [ -z "${REMOTE_ASR_PORTS:-}" ]; then
-  # Default vLLM ports used by docker-compose.remote-asr.yml / models.yml profiles.
+  # Default vLLM ports used by docker/compose/legacy remote-ASR / models profiles.
   #
   # IMPORTANT: treat them as optional — only include ports that are actually
   # listening, otherwise `smoke_all_endpoints.sh` will wait a long time.

@@ -9,7 +9,7 @@
 
 set -e
 
-COMPOSE_FILE="docker-compose.benchmark.yml"
+COMPOSE_FILE="docker/compose/legacy/docker-compose.benchmark.yml"
 IMAGE_NAME="xiyu-benchmark:latest"
 BENCHMARK_DIR="data/benchmark"
 
