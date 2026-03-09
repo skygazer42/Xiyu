@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Smoke-test Xiyu HTTP endpoints across multiple ports (multi-model deployment).
+# Smoke-test Xiyu HTTP endpoints.
+#
+# Default behavior targets the **single-entry router deployment**:
+# - Only one port is published to the host (env `PORT`, default 18200)
+# - Internal model services are probed via router `/api/v1/backend/targets`
+#
+# You can still override `PORTS="8101 8102 ..."` to test legacy multi-port setups.
 #
 # Usage:
 #   scripts/smoke_all_endpoints.sh
 #
 # Options (env):
-#   PORTS="8101 8102 ..."   Ports to test (default: common Xiyu ports)
+#   PORTS="18200 8101 ..."  Ports to test (default: ${PORT:-18200})
 #   AUDIO="data/benchmark/test_short.mp3"  Audio file for /transcribe tests
 #   TIMEOUT_S=10            Per-request curl timeout seconds (non-transcribe endpoints)
 #   TRANSCRIBE_TIMEOUT_S=60 /transcribe curl timeout seconds
-#   DIARIZER_PORT=8300      Optional diarizer port (set empty to skip)
+#   DIARIZER_PORT=          Optional diarizer port (legacy; set empty to skip)
 #   URL_AUDIO_URL="https://..." Optional public URL for /api/v1/trans/url smoke test
 #
 # Notes:
@@ -22,17 +28,13 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 #
-# Default ports:
-# - We intentionally exclude optional backends (GGUF=8104, VibeVoice=8202) so
-#   the smoke test passes in the common "Qwen3-only (no VibeVoice)" deployment.
-# - Override with PORTS="..." if you have other profiles running.
-PORTS="${PORTS:-8000 8101 8102 8103 8105 8201}"
+# Default: single-entry router port (recommended deployment).
+PORTS="${PORTS:-${PORT:-18200}}"
 # Use `-` (not `:-`) so DIARIZER_PORT="" can intentionally disable diarizer checks.
-DIARIZER_PORT="${DIARIZER_PORT-8300}"
-# Remote ASR readiness checks:
-# - Default to Qwen3-ASR only (9001). VibeVoice (9002) is optional.
-REMOTE_ASR_PORTS="${REMOTE_ASR_PORTS:-9001}"
-SKIP_REMOTE_ASR_CHECKS="${SKIP_REMOTE_ASR_CHECKS:-false}"
+DIARIZER_PORT="${DIARIZER_PORT-}"
+# Remote ASR ports are not published in the single-entry compose; keep checks off by default.
+REMOTE_ASR_PORTS="${REMOTE_ASR_PORTS:-}"
+SKIP_REMOTE_ASR_CHECKS="${SKIP_REMOTE_ASR_CHECKS:-true}"
 TIMEOUT_S="${TIMEOUT_S:-10}"
 # Transcribe calls can be slow (first-time model download/warmup), especially for
 # remote ASR backends. Use a higher default so the smoke test is reliable.
@@ -45,6 +47,20 @@ AUDIO="${AUDIO:-data/benchmark/test_short.mp3}"
 URL_AUDIO_URL="${URL_AUDIO_URL:-}"
 URL_TASK_POLL_RETRIES="${URL_TASK_POLL_RETRIES:-60}"
 URL_TASK_POLL_SLEEP_S="${URL_TASK_POLL_SLEEP_S:-2}"
+URL_FIXTURE_PORT="${URL_FIXTURE_PORT:-18081}"
+WS_SMOKE_ENABLE="${WS_SMOKE_ENABLE:-true}"
+
+URL_FIXTURE_PID=""
+
+_cleanup() {
+  if [ -n "${URL_FIXTURE_PID}" ]; then
+    kill "${URL_FIXTURE_PID}" >/dev/null 2>&1 || true
+    wait "${URL_FIXTURE_PID}" >/dev/null 2>&1 || true
+    URL_FIXTURE_PID=""
+  fi
+}
+
+trap _cleanup EXIT
 
 if [ ! -f "${AUDIO}" ]; then
   echo "ERROR: AUDIO not found: ${AUDIO}" >&2
@@ -194,6 +210,44 @@ _curl_text() {
   return 0
 }
 
+_curl_html() {
+  local url="$1"; shift || true
+  local body
+  local headers
+  body="$(_tmpfile)"
+  headers="$(_tmpfile)"
+  local code
+  if code="$(curl -sS -m "${TIMEOUT_S}" -D "${headers}" -o "${body}" -w '%{http_code}' "${url}" "$@")"; then
+    :
+  else
+    code="000"
+  fi
+
+  if [ "${code}" = "000" ]; then
+    echo "ERROR curl failed (HTTP 000): ${url}" >&2
+    _print_body_head "${body}"
+    rm -f "${body}" "${headers}" || true
+    return 1
+  fi
+
+  if [ "${code}" -lt 200 ] || [ "${code}" -ge 300 ]; then
+    echo "ERROR HTTP ${code}: ${url}" >&2
+    _print_body_head "${body}"
+    rm -f "${body}" "${headers}" || true
+    return 1
+  fi
+
+  if ! tr '[:upper:]' '[:lower:]' <"${headers}" | grep -q '^content-type: .*text/html'; then
+    echo "ERROR expected HTML content-type: ${url}" >&2
+    _print_body_head "${body}"
+    rm -f "${body}" "${headers}" || true
+    return 1
+  fi
+
+  rm -f "${body}" "${headers}" || true
+  return 0
+}
+
 _assert_transcribe_success() {
   # Usage: _assert_transcribe_success JSON_FILE
   local f="$1"
@@ -256,6 +310,198 @@ if code != expected:
 PY
 }
 
+_assert_preprocess_enhance_success() {
+  local body="$1"
+  local headers="$2"
+  python3 - "${body}" "${headers}" <<'PY'
+from pathlib import Path
+import sys
+
+body = Path(sys.argv[1])
+headers = Path(sys.argv[2]).read_text(encoding="utf-8", errors="ignore").lower()
+data = body.read_bytes()
+if "content-type: audio/wav" not in headers:
+    raise SystemExit("expected content-type audio/wav")
+if len(data) < 44 or data[:4] != b"RIFF" or b"WAVE" not in data[:64]:
+    raise SystemExit("expected WAV payload")
+PY
+}
+
+_assert_whisper_compatible_success() {
+  local f="$1"
+  python3 - "${f}" <<'PY'
+import json
+import sys
+
+obj = json.load(open(sys.argv[1], encoding="utf-8"))
+if not isinstance(obj.get("text"), str):
+    raise SystemExit("missing text")
+if not isinstance(obj.get("segments"), list):
+    raise SystemExit("missing segments")
+if not isinstance(obj.get("language"), str):
+    raise SystemExit("missing language")
+PY
+}
+
+_assert_transcribe_all_success() {
+  local f="$1"
+  python3 - "${f}" <<'PY'
+import json
+import sys
+
+obj = json.load(open(sys.argv[1], encoding="utf-8"))
+if obj.get("code") != 0:
+    raise SystemExit(f"expected code=0, got {obj.get('code')!r}")
+final = obj.get("final")
+if not isinstance(final, dict):
+    raise SystemExit("missing final result")
+if not isinstance(final.get("text"), str):
+    raise SystemExit("missing final.text")
+PY
+}
+
+_relative_audio_path() {
+  python3 - "${ROOT_DIR}" "${AUDIO}" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1]).resolve()
+audio = Path(sys.argv[2]).resolve()
+print(audio.relative_to(root).as_posix())
+PY
+}
+
+_maybe_setup_default_url_audio() {
+  if [ -n "${URL_AUDIO_URL}" ]; then
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local router_cid
+  router_cid="$(docker compose ps -q xiyu-router 2>/dev/null || true)"
+  if [ -z "${router_cid}" ]; then
+    return 0
+  fi
+
+  local gateway
+  gateway="$(docker inspect "${router_cid}" --format '{{range .NetworkSettings.Networks}}{{println .Gateway}}{{end}}' 2>/dev/null | awk 'NF{print; exit}')"
+  if [ -z "${gateway}" ]; then
+    return 0
+  fi
+
+  python3 -m http.server "${URL_FIXTURE_PORT}" --directory "${ROOT_DIR}" >/tmp/xiyu_smoke_http_server.log 2>&1 &
+  URL_FIXTURE_PID="$!"
+
+  local ready=0
+  for _ in $(seq 1 20); do
+    if curl -fsS -m 1 "http://127.0.0.1:${URL_FIXTURE_PORT}/$(_relative_audio_path)" >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 0.2
+  done
+
+  if [ "${ready}" -ne 1 ]; then
+    echo "WARN failed to start local URL fixture server on port ${URL_FIXTURE_PORT}" >&2
+    _cleanup
+    return 0
+  fi
+
+  URL_AUDIO_URL="http://${gateway}:${URL_FIXTURE_PORT}/$(_relative_audio_path)"
+}
+
+_ws_smoke_router() {
+  local base="$1"
+  if [ "${WS_SMOKE_ENABLE}" != "true" ]; then
+    return 2
+  fi
+
+  local router_cid
+  router_cid="$(docker compose ps -q xiyu-router 2>/dev/null || true)"
+  if [ -z "${router_cid}" ]; then
+    return 2
+  fi
+
+  case "${base}" in
+    "http://localhost:${PORT:-18200}"|"http://127.0.0.1:${PORT:-18200}")
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  local audio_rel
+  audio_rel="$(_relative_audio_path)"
+  if ! docker exec -i "${router_cid}" python - "${audio_rel}" <<'PY'
+import asyncio
+import json
+import subprocess
+import sys
+
+import websockets
+
+audio_path = "/app/" + sys.argv[1]
+uri = "ws://127.0.0.1:8000/ws/realtime"
+
+async def main() -> None:
+    pcm = subprocess.check_output(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-i",
+            audio_path,
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-",
+        ],
+        stderr=subprocess.DEVNULL,
+    )
+
+    got_connected = False
+    got_final = False
+
+    async with websockets.connect(uri, ping_interval=None, max_size=None, open_timeout=10) as ws:
+        for _ in range(5):
+            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if msg.get("type") == "connected":
+                got_connected = True
+                break
+
+        await ws.send(json.dumps({"mode": "2pass", "is_speaking": True, "chunk_interval": 4}))
+        chunk_size = max(len(pcm) // 4, 1)
+        for i in range(0, len(pcm), chunk_size):
+            await ws.send(pcm[i : i + chunk_size])
+        await ws.send(json.dumps({"is_speaking": False}))
+
+        for _ in range(24):
+            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if msg.get("type") == "ping":
+                await ws.send(json.dumps({"type": "pong"}))
+                continue
+            if msg.get("is_final") and isinstance(msg.get("text"), str) and msg.get("text"):
+                got_final = True
+                break
+
+    if not got_connected or not got_final:
+        raise SystemExit(1)
+
+asyncio.run(main())
+PY
+  then
+    return 1
+  fi
+
+  return 0
+}
+
 _test_one_base() {
   local base="$1"
   local tmp
@@ -268,6 +514,10 @@ _test_one_base() {
   echo "=============================="
 
   if _curl_json "${base}/health"; then _ok "${base} GET /health"; else _fail "${base} GET /health"; fi
+  if _curl_json "${base}/"; then _ok "${base} GET /"; else _fail "${base} GET /"; fi
+  if _curl_json "${base}/service-info"; then _ok "${base} GET /service-info"; else _fail "${base} GET /service-info"; fi
+  if _curl_html "${base}/" -H "Accept: text/html"; then _ok "${base} GET / (HTML)"; else _fail "${base} GET / (HTML)"; fi
+  if _curl_html "${base}/docs"; then _ok "${base} GET /docs"; else _fail "${base} GET /docs"; fi
   if _curl_json "${base}/openapi.json"; then _ok "${base} GET /openapi.json"; else _fail "${base} GET /openapi.json"; fi
   if _curl_json "${base}/api/v1/backend"; then _ok "${base} GET /api/v1/backend"; else _fail "${base} GET /api/v1/backend"; fi
   if _curl_json "${base}/api/v1/backend/targets"; then _ok "${base} GET /api/v1/backend/targets"; else _fail "${base} GET /api/v1/backend/targets"; fi
@@ -282,6 +532,23 @@ _test_one_base() {
     _fail "${base} GET /api/v1/preprocess/status"
   fi
   rm -f "${tmp}" || true
+
+  tmp="$(_tmpfile)"
+  local hdr
+  hdr="$(_tmpfile)"
+  code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/preprocess/enhance" \
+    -D "${hdr}" \
+    -X POST \
+    -F "file=@${AUDIO}" \
+  )"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && _assert_preprocess_enhance_success "${tmp}" "${hdr}" >/dev/null 2>&1; then
+    _ok "${base} POST /api/v1/preprocess/enhance"
+  else
+    echo "ERROR HTTP ${code}: ${base}/api/v1/preprocess/enhance" >&2
+    _print_body_head "${tmp}"
+    _fail "${base} POST /api/v1/preprocess/enhance"
+  fi
+  rm -f "${tmp}" "${hdr}" || true
 
   if _curl_json "${base}/metrics"; then _ok "${base} GET /metrics"; else _fail "${base} GET /metrics"; fi
   if _curl_text "${base}/metrics/prometheus"; then _ok "${base} GET /metrics/prometheus"; else _fail "${base} GET /metrics/prometheus"; fi
@@ -545,6 +812,23 @@ PY
   rm -f "${tmp}" || true
 
   tmp="$(_tmpfile)"
+  code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/asr" \
+    -X POST \
+    -F "file=@${AUDIO}" \
+    -F "file_type=audio" \
+    -F "with_speaker=true" \
+    -F "apply_hotword=true" \
+  )"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_whisper_compatible_success "${tmp}" >/dev/null 2>&1; then
+    _ok "${base} POST /api/v1/asr"
+  else
+    echo "ERROR HTTP ${code}: ${base}/api/v1/asr" >&2
+    _print_body_head "${tmp}"
+    _fail "${base} POST /api/v1/asr"
+  fi
+  rm -f "${tmp}" || true
+
+  tmp="$(_tmpfile)"
   code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/transcribe/batch" \
     -X POST \
     -F "files=@${AUDIO}" \
@@ -560,6 +844,24 @@ PY
     echo "ERROR HTTP ${code}: ${base}/api/v1/transcribe/batch" >&2
     _print_body_head "${tmp}"
     _fail "${base} POST /api/v1/transcribe/batch"
+  fi
+  rm -f "${tmp}" || true
+
+  tmp="$(_tmpfile)"
+  code="$(_curl_to_file_timeout "${TRANSCRIBE_TIMEOUT_S}" "${tmp}" "${base}/api/v1/transcribe/all" \
+    -X POST \
+    -F "file=@${AUDIO}" \
+    -F "with_speaker=true" \
+    -F "apply_hotword=true" \
+    -F "apply_llm=false" \
+    -F "include_srt=false" \
+  )"
+  if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ] && python3 -m json.tool <"${tmp}" >/dev/null 2>&1 && _assert_transcribe_all_success "${tmp}" >/dev/null 2>&1; then
+    _ok "${base} POST /api/v1/transcribe/all"
+  else
+    echo "ERROR HTTP ${code}: ${base}/api/v1/transcribe/all" >&2
+    _print_body_head "${tmp}"
+    _fail "${base} POST /api/v1/transcribe/all"
   fi
   rm -f "${tmp}" || true
 
@@ -717,6 +1019,16 @@ PY
   else
     echo "SKIP ${base} /api/v1/trans/url (set URL_AUDIO_URL=... to enable)" >&2
   fi
+
+  local ws_status=0
+  _ws_smoke_router "${base}" || ws_status=$?
+  if [ "${ws_status}" -eq 0 ]; then
+    _ok "${base} WS /ws/realtime"
+  elif [ "${ws_status}" -eq 2 ]; then
+    echo "SKIP ${base} WS /ws/realtime" >&2
+  else
+    _fail "${base} WS /ws/realtime"
+  fi
 }
 
 _test_diarizer() {
@@ -757,10 +1069,16 @@ echo "Xiyu smoke test"
 echo "- PORTS=${PORTS}"
 echo "- REMOTE_ASR_PORTS=${REMOTE_ASR_PORTS} (skip=${SKIP_REMOTE_ASR_CHECKS})"
 echo "- AUDIO=${AUDIO}"
-echo "- URL_AUDIO_URL=${URL_AUDIO_URL:-<empty>}"
 echo "- TIMEOUT_S=${TIMEOUT_S}"
 echo "- TRANSCRIBE_TIMEOUT_S=${TRANSCRIBE_TIMEOUT_S}"
 echo "- REMOTE_ASR_TIMEOUT_S=${REMOTE_ASR_TIMEOUT_S} retries=${REMOTE_ASR_READY_RETRIES} sleep=${REMOTE_ASR_READY_SLEEP_S}s"
+echo "- URL_FIXTURE_PORT=${URL_FIXTURE_PORT}"
+echo "- WS_SMOKE_ENABLE=${WS_SMOKE_ENABLE}"
+echo ""
+
+_maybe_setup_default_url_audio
+
+echo "- URL_AUDIO_URL=${URL_AUDIO_URL:-<empty>}"
 echo ""
 
 if [ "${SKIP_REMOTE_ASR_CHECKS}" != "true" ] && [ -n "${REMOTE_ASR_PORTS}" ]; then

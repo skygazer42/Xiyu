@@ -41,6 +41,32 @@ async def _heartbeat_task(websocket: WebSocket, interval: int, timeout: int):
             break
 
 
+async def _flush_offline_result(websocket: WebSocket, state: ConnectionState, frames: list[bytes]) -> bool:
+    """Emit the final offline transcript for the buffered utterance, if any."""
+    if state.is_speaking or not frames or state.mode not in ("2pass", "offline"):
+        return False
+
+    audio_in = b"".join(frames)
+    result = await _asr_offline(audio_in, state)
+    if result and result.get("text"):
+        text = result["text"]
+        if transcription_engine._hotwords_loaded:
+            correction = transcription_engine.corrector.correct(text)
+            text = correction.text
+
+        if settings.stream_dedup_enable:
+            text = state.text_merger.merge_final(text)
+
+        await websocket.send_json({
+            "mode": "2pass-offline" if state.mode == "2pass" else "offline",
+            "text": text,
+            "is_final": True,
+        })
+
+    state.reset()
+    return True
+
+
 @router.websocket("/ws/realtime")
 async def websocket_realtime(websocket: WebSocket):
     """
@@ -108,7 +134,13 @@ async def websocket_realtime(websocket: WebSocket):
                     if config.get("type") == "pong":
                         continue
 
+                    was_speaking = state.is_speaking
                     _handle_config(state, config)
+                    if was_speaking and not state.is_speaking:
+                        flushed = await _flush_offline_result(websocket, state, frames)
+                        if flushed:
+                            frames = []
+                            frames_online = []
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSON config: {message['text']}")
                 continue
@@ -137,35 +169,17 @@ async def websocket_realtime(websocket: WebSocket):
                                 })
                         frames_online = []
 
-                # 说话结束时执行离线识别
-                if not state.is_speaking:
-                    if state.mode in ("2pass", "offline") and frames:
-                        audio_in = b"".join(frames)
-                        result = await _asr_offline(audio_in, state)
-                        if result and result.get("text"):
-                            text = result["text"]
-                            # 热词纠错
-                            if transcription_engine._hotwords_loaded:
-                                correction = transcription_engine.corrector.correct(text)
-                                text = correction.text
-
-                            # 流式去重 (最终文本)
-                            if settings.stream_dedup_enable:
-                                text = state.text_merger.merge_final(text)
-
-                            await websocket.send_json({
-                                "mode": "2pass-offline" if state.mode == "2pass" else "offline",
-                                "text": text,
-                                "is_final": True,
-                            })
-
-                    # 重置
+                if await _flush_offline_result(websocket, state, frames):
                     frames = []
                     frames_online = []
-                    state.reset()
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {connection_id}")
+    except RuntimeError as e:
+        if 'disconnect message has been received' in str(e):
+            logger.info(f"WebSocket disconnected: {connection_id}")
+        else:
+            logger.error(f"WebSocket error: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"WebSocket error: {e}", exc_info=True)
     finally:
@@ -203,14 +217,16 @@ async def _asr_online(audio_in: bytes, state: ConnectionState) -> dict:
     注意: 始终使用 PyTorch 后端的流式功能。
     """
     try:
-        # 使用 PyTorch 后端的流式模型
-        online_model = model_manager.loader.asr_model_online
-        result = online_model.generate(
-            input=audio_in,
-            cache=state.asr_cache,
-            is_final=not state.is_speaking,
-            hotword=state.hotwords,
-        )
+        def _generate():
+            online_model = model_manager.loader.asr_model_online
+            return online_model.generate(
+                input=audio_in,
+                cache=state.asr_cache,
+                is_final=not state.is_speaking,
+                hotword=state.hotwords,
+            )
+
+        result = await asyncio.to_thread(_generate)
         if result:
             state.asr_cache = result[0].get("cache", {})
             return {"text": result[0].get("text", "")}
@@ -225,26 +241,30 @@ async def _asr_offline(audio_in: bytes, state: ConnectionState) -> dict:
     使用配置的后端进行离线识别。
     """
     try:
-        backend = model_manager.backend
+        def _transcribe():
+            backend = model_manager.backend
+            backend_info = backend.get_info() if hasattr(backend, "get_info") else {}
+            backend_type = str((backend_info or {}).get("type") or "").strip().lower()
 
-        # 如果后端支持，使用后端转写
-        if backend.supports_streaming or backend.get_info()["type"] == "pytorch":
-            # PyTorch 后端使用 loader
-            offline_model = model_manager.loader.asr_model
-            result = offline_model.generate(
-                input=audio_in,
-                hotword=state.hotwords,
-            )
-            if result:
-                return {"text": result[0].get("text", "")}
-        else:
-            # 其他后端使用 backend.transcribe
+            if backend.supports_streaming or backend_type == "pytorch":
+                offline_model = model_manager.loader.asr_model
+                result = offline_model.generate(
+                    input=audio_in,
+                    hotword=state.hotwords,
+                )
+                if result:
+                    return {"text": result[0].get("text", "")}
+                return {}
+
             result = backend.transcribe(
                 audio_in,
                 hotwords=state.hotwords,
             )
             if result:
                 return {"text": result.get("text", "")}
+            return {}
+
+        return await asyncio.to_thread(_transcribe)
     except Exception as e:
         logger.error(f"Offline ASR error: {e}")
     return {}

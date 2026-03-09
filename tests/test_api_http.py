@@ -390,3 +390,48 @@ def test_transcribe_video_passes_hotwords_and_asr_options_and_returns_speaker_tu
         kwargs = mock_transcribe_auto_async.await_args.kwargs
         assert kwargs["hotwords"] == "张三 李四"
         assert kwargs["asr_options"] == {"preprocess": {"normalize_enable": False}, "speaker": {"label_style": "numeric"}}
+
+
+def test_asr_whisper_compatible_uses_transcribe_async(client, tmp_path, monkeypatch):
+    import src.api.routes.async_transcribe as async_mod
+
+    wav_bytes = b"\x00" * 32000
+
+    def fake_convert_audio_to_pcm(_input_path: str, output_path: str) -> bool:
+        from pathlib import Path
+
+        Path(output_path).write_bytes(wav_bytes)
+        return True
+
+    monkeypatch.setattr(async_mod.settings, "uploads_dir", tmp_path, raising=False)
+
+    with (
+        patch("src.api.routes.async_transcribe.convert_audio_to_pcm", side_effect=fake_convert_audio_to_pcm),
+        patch(
+            "src.api.routes.async_transcribe.transcription_engine.transcribe_async",
+            new_callable=AsyncMock,
+        ) as mock_transcribe_async,
+        patch("src.api.routes.async_transcribe.transcription_engine.transcribe") as mock_transcribe_sync,
+    ):
+        mock_transcribe_sync.side_effect = AssertionError("sync transcribe should not be used in async route")
+        mock_transcribe_async.return_value = {
+            "text": "你好世界",
+            "sentences": [{"text": "你好世界", "start": 0, "end": 1000, "speaker": "说话人甲"}],
+        }
+
+        files = {"file": ("test.mp3", io.BytesIO(b"fake-audio"), "audio/mpeg")}
+        data = {"file_type": "audio", "with_speaker": "true", "apply_hotword": "true"}
+
+        response = client.post("/api/v1/asr", files=files, data=data)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["text"] == "你好世界"
+        assert body["language"] == "zh"
+        assert len(body["segments"]) == 1
+
+        mock_transcribe_async.assert_awaited_once()
+        kwargs = mock_transcribe_async.await_args.kwargs
+        assert kwargs["with_speaker"] is True
+        assert kwargs["apply_hotword"] is True
+        mock_transcribe_sync.assert_not_called()

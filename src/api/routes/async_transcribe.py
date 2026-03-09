@@ -509,7 +509,7 @@ async def asr_whisper_compatible(
             audio_bytes = f.read()
 
         # 执行转写
-        result = transcription_engine.transcribe(
+        result = await transcription_engine.transcribe_async(
             audio_bytes,
             with_speaker=with_speaker,
             apply_hotword=apply_hotword
