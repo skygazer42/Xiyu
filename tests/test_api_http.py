@@ -56,6 +56,19 @@ def test_backend_info_endpoint(client):
 
     assert data["speaker_unsupported_behavior"] in {"error", "fallback", "ignore"}
 
+def test_config_includes_meeting_overview_toggle(client):
+    resp = client.get("/config")
+    assert resp.status_code == 200
+    body = resp.json()
+    cfg = body.get("config") or {}
+    assert "meeting_overview_enable" in cfg
+
+    # Toggle should be mutable at runtime.
+    resp2 = client.post("/config", json={"updates": {"meeting_overview_enable": False}})
+    assert resp2.status_code == 200
+    cfg2 = (resp2.json() or {}).get("config") or {}
+    assert cfg2.get("meeting_overview_enable") is False
+
 def test_preprocess_enhance_endpoint_returns_wav(client):
     with patch("src.api.routes.preprocess.process_audio_file") as mock_process:
         async def fake_process(file, preprocess_options=None):

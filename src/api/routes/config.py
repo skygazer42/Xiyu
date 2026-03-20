@@ -72,6 +72,8 @@ MUTABLE_CONFIG_KEYS = {
     "llm_fulltext_enable",
     "llm_batch_size",
     "llm_context_sentences",
+    # 会议概览（LLM summarization）
+    "meeting_overview_enable",
     # 文本后处理
     "filler_remove_enable",
     "filler_aggressive",
