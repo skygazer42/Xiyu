@@ -114,6 +114,49 @@ def test_transcribe_endpoint(client):
         assert "text" in data
         assert "sentences" in data
 
+def test_transcribe_endpoint_returns_overview_task_id_when_enabled(client, monkeypatch):
+    """当启用 LLM + meeting_overview 时，/transcribe 返回 overview_task_id 并可通过 /result 拉取。"""
+    from src.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "llm_enable", True, raising=False)
+    monkeypatch.setattr(app_settings, "meeting_overview_enable", True, raising=False)
+    monkeypatch.setattr(app_settings, "meeting_overview_auto", True, raising=False)
+    monkeypatch.setattr(app_settings, "meeting_overview_role", "gov_overview", raising=False)
+
+    # Patch meeting overview generation so no real network call happens in task worker.
+    with patch("src.core.meeting_overview.generate_meeting_overview_sync", return_value="OVERVIEW"):
+        with patch('src.api.routes.transcribe.transcription_engine.transcribe_auto_async', new_callable=AsyncMock) as mock_transcribe_auto_async, \
+             patch('src.api.routes.transcribe.process_audio_file') as mock_process:
+            mock_transcribe_auto_async.return_value = {
+                "text": "你好世界",
+                "sentences": [{"text": "你好世界", "start": 0, "end": 1000}],
+                "raw_text": "你好世界",
+            }
+
+            async def fake_process(file, preprocess_options=None):
+                yield b"\x00" * 32000
+            mock_process.side_effect = fake_process
+
+            files = {"file": ("test.wav", io.BytesIO(b"fake"), "audio/wav")}
+            response = client.post("/api/v1/transcribe", files=files)
+
+        assert response.status_code == 200
+        body = response.json()
+        task_id = body.get("overview_task_id")
+        assert isinstance(task_id, str) and task_id.strip()
+
+        # Poll /api/v1/result until overview is ready (worker thread scheduling).
+        for _ in range(50):
+            r = client.post("/api/v1/result", data={"task_id": task_id, "delete": "false"})
+            assert r.status_code == 200
+            obj = r.json()
+            if obj.get("status") == "success":
+                data = obj.get("data") or {}
+                assert data.get("overview") == "OVERVIEW"
+                break
+        else:
+            raise AssertionError("overview task did not complete in time")
+
 def test_transcribe_with_speaker(client):
     """测试带说话人的转写"""
     with patch('src.api.routes.transcribe.transcription_engine.transcribe_auto_async', new_callable=AsyncMock) as mock_transcribe_auto_async, \

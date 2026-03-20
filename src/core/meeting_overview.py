@@ -232,3 +232,34 @@ def generate_meeting_overview_sync(*args: Any, **kwargs: Any) -> str:
         # Running inside an event loop (unlikely for TaskManager worker threads).
         return asyncio.run_coroutine_threadsafe(coro, loop).result()
     return asyncio.run(coro)
+
+
+def _handle_meeting_overview_task(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """TaskManager handler: generate overview text from payload."""
+    p = payload or {}
+    text = str(p.get("text") or "").strip()
+    role = str(p.get("role") or settings.meeting_overview_role or "gov_overview").strip() or "gov_overview"
+
+    max_chars = p.get("max_input_chars", None)
+    chunk_chars = p.get("chunk_chars", None)
+
+    if not text:
+        return {"overview": ""}
+
+    overview = generate_meeting_overview_sync(
+        text,
+        role=role,
+        max_input_chars=max_chars,
+        chunk_chars=chunk_chars,
+    )
+    return {"overview": overview}
+
+
+# Register task handler (best-effort). This keeps the API layer simple: it can
+# submit `meeting_overview` tasks without worrying about import order.
+try:
+    from src.core.task_manager import task_manager
+
+    task_manager.register_handler("meeting_overview", _handle_meeting_overview_task)
+except Exception as e:
+    logger.debug("meeting_overview task handler not registered: %s", e)

@@ -12,8 +12,11 @@ from src.api.schemas import (
 )
 from src.api.dependencies import process_audio_file
 from src.api.asr_options import parse_asr_options
+from src.config import settings
 from src.core.engine import transcription_engine
 from src.core.ensemble_v2 import transcribe_all_models
+from src.core.meeting_overview import build_overview_source_text
+from src.core.task_manager import task_manager
 from src.utils.service_metrics import metrics
 from src.utils.subtitles import generate_srt_from_result
 from src.models.backends.remote_utils import pcm16le_to_wav_bytes
@@ -100,6 +103,28 @@ async def transcribe_audio(
             metrics.add_processing_time(time.time() - t0)
             metrics.increment_success()
 
+            overview_task_id: Optional[str] = None
+            # Auto meeting overview (best-effort, non-blocking): submit a background task.
+            if (
+                bool(getattr(settings, "llm_enable", False))
+                and bool(getattr(settings, "meeting_overview_enable", True))
+                and bool(getattr(settings, "meeting_overview_auto", True))
+            ):
+                try:
+                    source_text = build_overview_source_text(result)
+                    if source_text:
+                        overview_task_id = task_manager.submit(
+                            "meeting_overview",
+                            {
+                                "text": source_text,
+                                "role": str(getattr(settings, "meeting_overview_role", "gov_overview") or "gov_overview"),
+                                "max_input_chars": int(getattr(settings, "meeting_overview_max_input_chars", 12000) or 12000),
+                                "chunk_chars": int(getattr(settings, "meeting_overview_chunk_chars", 6000) or 6000),
+                            },
+                        )
+                except Exception as e:
+                    logger.warning("Submit meeting overview task failed (ignored): %s", e)
+
             srt: Optional[str] = None
             if include_srt:
                 try:
@@ -120,6 +145,8 @@ async def transcribe_audio(
                 transcript=result.get("transcript"),
                 srt=srt,
                 raw_text=result.get("raw_text"),
+                overview=result.get("overview"),
+                overview_task_id=overview_task_id,
             )
 
     except ValueError as e:
