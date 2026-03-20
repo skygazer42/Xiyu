@@ -46,6 +46,7 @@ const HOTWORD_CONFIGS: ConfigItemDef[] = [
 
 const LLM_CONFIGS: ConfigItemDef[] = [
   { key: 'llm_enable', label: '启用 LLM 润色', description: '使用大语言模型优化转写结果', type: 'switch' },
+  { key: 'meeting_overview_enable', label: '会议概览', description: '转写完成后自动生成 2-5 段政务口径概览（需启用 LLM）', type: 'switch' },
   {
     key: 'llm_role', label: 'LLM 角色', description: '选择 LLM 的处理角色', type: 'select',
     options: [
