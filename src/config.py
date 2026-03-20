@@ -230,6 +230,18 @@ class Settings(BaseSettings):
     llm_cache_size: int = 1000  # 缓存大小
     llm_cache_ttl: int = 3600  # 缓存 TTL (秒)
 
+    # ------------------------------------------------------------
+    # Meeting overview (LLM summarization, gov-style)
+    # ------------------------------------------------------------
+    # Default enabled: frontend can toggle at runtime via /config.
+    # NOTE: overview generation still requires `llm_enable=true`.
+    meeting_overview_enable: bool = True
+    meeting_overview_auto: bool = True
+    meeting_overview_role: str = "gov_overview"
+    # Input size gates (best-effort; used by generator to decide chunking mode).
+    meeting_overview_max_input_chars: int = 12000
+    meeting_overview_chunk_chars: int = 6000
+
     # 通用文本纠错配置 (pycorrector)
     text_correct_enable: bool = False            # 通用文本纠错开关
     text_correct_backend: str = "kenlm"          # kenlm | macbert
