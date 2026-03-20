@@ -290,7 +290,40 @@ Content-Type: multipart/form-data
   ],
   "transcript": "[00:00 - 00:03] 说话人甲: 今天的会议主要讨论人工智能的应用。",
   "srt": "1\\n00:00:00,000 --> 00:00:03,500\\n[说话人甲] 今天的会议主要讨论人工智能的应用。\\n",
-  "raw_text": "今天的会议主要讨论人工只能的应用"
+  "raw_text": "今天的会议主要讨论人工只能的应用",
+  "overview": null,
+  "overview_task_id": "9f0d... (示例)"
+}
+```
+
+#### 会议概览（自动生成，可选）
+
+当满足以下条件时，服务会在转写完成后自动触发“会议概览”生成：
+
+- `LLM_ENABLE=true`
+- `MEETING_OVERVIEW_ENABLE=true`（默认开启；可在 Web UI 配置管理页运行时开关）
+
+字段说明：
+
+- `overview`: 会议概览正文（2-5 段，政务口径，LLM 生成）。有些场景会直接返回。
+- `overview_task_id`: 概览异步任务 ID。若该字段存在且 `overview` 为空，可通过 `/api/v1/result` 轮询获取概览结果：
+
+```bash
+curl -X POST "http://localhost:18200/api/v1/result" \
+  -F "task_id=<overview_task_id>" \
+  -F "delete=false"
+```
+
+成功时返回：
+
+```json
+{
+  "code": 200,
+  "status": "success",
+  "message": "获取结果成功",
+  "data": {
+    "overview": "..."
+  }
 }
 ```
 
