@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, Mock, MagicMock, AsyncMock
 import io
+import time
 
 @pytest.fixture
 def client():
@@ -63,11 +64,19 @@ def test_config_includes_meeting_overview_toggle(client):
     cfg = body.get("config") or {}
     assert "meeting_overview_enable" in cfg
 
+    before = bool(cfg.get("meeting_overview_enable"))
+
     # Toggle should be mutable at runtime.
     resp2 = client.post("/config", json={"updates": {"meeting_overview_enable": False}})
     assert resp2.status_code == 200
     cfg2 = (resp2.json() or {}).get("config") or {}
     assert cfg2.get("meeting_overview_enable") is False
+
+    # Restore to avoid leaking state across tests.
+    resp3 = client.post("/config", json={"updates": {"meeting_overview_enable": before}})
+    assert resp3.status_code == 200
+    cfg3 = (resp3.json() or {}).get("config") or {}
+    assert bool(cfg3.get("meeting_overview_enable")) is before
 
 def test_preprocess_enhance_endpoint_returns_wav(client):
     with patch("src.api.routes.preprocess.process_audio_file") as mock_process:
@@ -146,14 +155,17 @@ def test_transcribe_endpoint_returns_overview_task_id_when_enabled(client, monke
         assert isinstance(task_id, str) and task_id.strip()
 
         # Poll /api/v1/result until overview is ready (worker thread scheduling).
-        for _ in range(50):
+        for _ in range(100):
             r = client.post("/api/v1/result", data={"task_id": task_id, "delete": "false"})
             assert r.status_code == 200
             obj = r.json()
+            if obj.get("status") == "error":
+                raise AssertionError(obj.get("message") or "overview task failed")
             if obj.get("status") == "success":
                 data = obj.get("data") or {}
                 assert data.get("overview") == "OVERVIEW"
                 break
+            time.sleep(0.01)
         else:
             raise AssertionError("overview task did not complete in time")
 
@@ -281,21 +293,24 @@ def test_transcribe_all_models_returns_overview_task_id_when_enabled(client, mon
             files = {"file": ("test.wav", io.BytesIO(b"fake"), "audio/wav")}
             response = client.post("/api/v1/transcribe/all", files=files)
 
-    assert response.status_code == 200
-    body = response.json()
-    task_id = (body.get("final") or {}).get("overview_task_id")
-    assert isinstance(task_id, str) and task_id.strip()
+        assert response.status_code == 200
+        body = response.json()
+        task_id = (body.get("final") or {}).get("overview_task_id")
+        assert isinstance(task_id, str) and task_id.strip()
 
-    for _ in range(50):
-        r = client.post("/api/v1/result", data={"task_id": task_id, "delete": "false"})
-        assert r.status_code == 200
-        obj = r.json()
-        if obj.get("status") == "success":
-            data = obj.get("data") or {}
-            assert data.get("overview") == "OVERVIEW"
-            break
-    else:
-        raise AssertionError("overview task did not complete in time")
+        for _ in range(150):
+            r = client.post("/api/v1/result", data={"task_id": task_id, "delete": "false"})
+            assert r.status_code == 200
+            obj = r.json()
+            if obj.get("status") == "error":
+                raise AssertionError(obj.get("message") or "overview task failed")
+            if obj.get("status") == "success":
+                data = obj.get("data") or {}
+                assert data.get("overview") == "OVERVIEW"
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("overview task did not complete in time")
 
 
 def test_transcribe_asr_options_invalid_json(client):
