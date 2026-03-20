@@ -246,6 +246,58 @@ def test_transcribe_all_models_includes_srt(client):
         assert "[说话人甲]" in body["final"]["srt"]
 
 
+def test_transcribe_all_models_returns_overview_task_id_when_enabled(client, monkeypatch):
+    from src.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "llm_enable", True, raising=False)
+    monkeypatch.setattr(app_settings, "meeting_overview_enable", True, raising=False)
+    monkeypatch.setattr(app_settings, "meeting_overview_auto", True, raising=False)
+    monkeypatch.setattr(app_settings, "meeting_overview_role", "gov_overview", raising=False)
+
+    with patch("src.core.meeting_overview.generate_meeting_overview_sync", return_value="OVERVIEW"):
+        with patch('src.api.routes.transcribe.transcribe_all_models', new_callable=AsyncMock) as mock_all, \
+             patch('src.api.routes.transcribe.process_audio_file') as mock_process:
+            mock_all.return_value = {
+                "code": 0,
+                "base_backend": "pytorch",
+                "llm_used": True,
+                "llm_role": "policy_meeting",
+                "candidates": [],
+                "final": {
+                    "code": 0,
+                    "text": "你好",
+                    "text_accu": None,
+                    "sentences": [{"text": "你好", "start": 0, "end": 500, "speaker": "说话人甲", "speaker_id": 0}],
+                    "speaker_turns": None,
+                    "transcript": "[00:00 - 00:00] 说话人甲: 你好",
+                    "raw_text": None,
+                },
+            }
+
+            async def fake_process(file, preprocess_options=None):
+                yield b"\x00" * (16000 * 2)
+            mock_process.side_effect = fake_process
+
+            files = {"file": ("test.wav", io.BytesIO(b"fake"), "audio/wav")}
+            response = client.post("/api/v1/transcribe/all", files=files)
+
+    assert response.status_code == 200
+    body = response.json()
+    task_id = (body.get("final") or {}).get("overview_task_id")
+    assert isinstance(task_id, str) and task_id.strip()
+
+    for _ in range(50):
+        r = client.post("/api/v1/result", data={"task_id": task_id, "delete": "false"})
+        assert r.status_code == 200
+        obj = r.json()
+        if obj.get("status") == "success":
+            data = obj.get("data") or {}
+            assert data.get("overview") == "OVERVIEW"
+            break
+    else:
+        raise AssertionError("overview task did not complete in time")
+
+
 def test_transcribe_asr_options_invalid_json(client):
     with patch('src.api.routes.transcribe.transcription_engine.transcribe_auto_async', new_callable=AsyncMock) as mock_transcribe_auto_async, \
          patch('src.api.routes.transcribe.process_audio_file') as mock_process:

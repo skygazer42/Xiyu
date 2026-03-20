@@ -379,6 +379,33 @@ async def transcribe_all_models_api(
             except Exception as e:
                 logger.warning("Generate SRT for ensemble final failed (ignored): %s", e)
 
+        # Auto meeting overview (best-effort, non-blocking): submit a background task.
+        if (
+            bool(getattr(settings, "llm_enable", False))
+            and bool(getattr(settings, "meeting_overview_enable", True))
+            and bool(getattr(settings, "meeting_overview_auto", True))
+        ):
+            try:
+                final_obj = out.get("final") if isinstance(out, dict) else None
+                if isinstance(final_obj, dict):
+                    source_text = build_overview_source_text(final_obj)
+                    if source_text:
+                        final_obj["overview_task_id"] = task_manager.submit(
+                            "meeting_overview",
+                            {
+                                "text": source_text,
+                                "role": str(
+                                    getattr(settings, "meeting_overview_role", "gov_overview") or "gov_overview"
+                                ),
+                                "max_input_chars": int(
+                                    getattr(settings, "meeting_overview_max_input_chars", 12000) or 12000
+                                ),
+                                "chunk_chars": int(getattr(settings, "meeting_overview_chunk_chars", 6000) or 6000),
+                            },
+                        )
+            except Exception as e:
+                logger.warning("Submit meeting overview task for ensemble failed (ignored): %s", e)
+
         # Best-effort: derive audio duration from timestamps so avg_rtf is meaningful
         # even when the uploaded bytes are not PCM.
         try:
