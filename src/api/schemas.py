@@ -53,6 +53,14 @@ class TranscribeResponse(BaseModel):
         description="SRT 字幕内容（可选，基于 sentences 或 speaker_turns 生成，包含说话人标签）",
     )
     raw_text: Optional[str] = Field(default=None, description="原始文本 (未纠错)")
+    overview: Optional[str] = Field(
+        default=None,
+        description="会议概览（可选，LLM 生成；2-5 段政务口径概览文本）",
+    )
+    overview_task_id: Optional[str] = Field(
+        default=None,
+        description="会议概览异步任务 ID（可选；可通过 /api/v1/result 轮询获取 overview）",
+    )
 
 
 class BatchTranscribeItem(BaseModel):

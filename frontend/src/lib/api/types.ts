@@ -27,6 +27,10 @@ export interface TranscribeResponse {
   /** Backend-generated SRT content (optional). */
   srt?: string | null
   raw_text?: string
+  /** Meeting overview text (optional, LLM-generated). */
+  overview?: string | null
+  /** Meeting overview async task id (optional; poll via /api/v1/result). */
+  overview_task_id?: string | null
 }
 
 export interface BatchTranscribeItem {
