@@ -45,6 +45,19 @@ class TestRoleSystem:
         assert role.name == "meeting"
         assert "会议" in role.system_prompt
 
+    def test_gov_overview_role(self):
+        """测试政务会议概览角色（用于会议概览生成）"""
+        from src.core.llm.roles import get_role
+
+        role = get_role("gov_overview")
+        assert role is not None
+        assert role.name == "gov_overview"
+
+        prompt = role.system_prompt
+        # Hard requirements: official tone + 2-5 paragraphs + no hallucination.
+        assert ("2-5" in prompt) or ("2 到 5" in prompt)
+        assert "不得编造" in prompt or "禁止" in prompt
+
     def test_fallback_to_default(self):
         """测试未知角色回退到默认"""
         from src.core.llm.roles import get_role, DefaultRole

@@ -11,6 +11,7 @@ from src.core.llm.roles.policy_polish_aggressive import PolicyPolishAggressiveRo
 from src.core.llm.roles.policy_meeting import PolicyMeetingRole
 from src.core.llm.roles.policy_meeting_aggressive import PolicyMeetingAggressiveRole
 from src.core.llm.roles.policy_meeting_v2 import PolicyMeetingV2Role
+from src.core.llm.roles.gov_overview import GovOverviewRole
 
 __all__ = [
     'Role',
@@ -27,4 +28,5 @@ __all__ = [
     'PolicyMeetingRole',
     'PolicyMeetingAggressiveRole',
     'PolicyMeetingV2Role',
+    'GovOverviewRole',
 ]
