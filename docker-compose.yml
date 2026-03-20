@@ -59,6 +59,9 @@ x-xiyu-env: &xiyu-env
   # ClearVoice denoise microservice
   CLEARVOICE_ENABLE: ${CLEARVOICE_ENABLE:-true}
   CLEARVOICE_MODEL: ${CLEARVOICE_MODEL:-MossFormer2_48000Hz}
+  # Default: run ClearVoice on GPU. If you hit CUDA OOM on single-GPU stacks,
+  # either lower QWEN3_GPU_MEMORY_UTILIZATION (e.g. 0.45) or set:
+  #   CLEARVOICE_FORCE_CPU=true
   CLEARVOICE_FORCE_CPU: ${CLEARVOICE_FORCE_CPU:-false}
   CLEARVOICE_STUDIO_DIR: ${CLEARVOICE_STUDIO_DIR:-/data/ClearerVoice-Studio/clearvoice}
   CLEARVOICE_CHUNK_DURATION_S: ${CLEARVOICE_CHUNK_DURATION_S:-30.0}
@@ -111,6 +114,7 @@ services:
       - xiyu-pytorch
       - xiyu-onnx
       - xiyu-sensevoice
+      - xiyu-gguf
       - xiyu-whisper
       - xiyu-diarizer
       - xiyu-clearvoice
@@ -208,6 +212,36 @@ services:
       OMP_NUM_THREADS: ${ONNX_NCPU:-8}
       MKL_NUM_THREADS: ${ONNX_NCPU:-8}
 
+  # GGUF backend (CPU-oriented; internal-only)
+  # Notes:
+  # - Requires Fun-ASR-Nano-GGUF model files under ./data/models/Fun-ASR-Nano-GGUF/
+  # - Uses llama.cpp shared libs bundled in the image (/app/llama_cpp/lib)
+  xiyu-gguf:
+    <<: *xiyu-base
+    build:
+      context: .
+      dockerfile: Dockerfile.gguf
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        LLAMA_CPP_REPO: ${LLAMA_CPP_REPO:-https://github.com/ggml-org/llama.cpp.git}
+        LLAMA_CPP_REPO_FALLBACK: ${LLAMA_CPP_REPO_FALLBACK:-https://gitee.com/mirrors/llama.cpp.git}
+        LLAMA_CPP_REF: ${LLAMA_CPP_REF:-}
+    image: xiyu-speech-service:gguf
+    restart: unless-stopped
+    logging: *xiyu-logging
+    volumes:
+      - ./data:/app/data
+      - modelscope-cache:/root/.cache/modelscope
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      <<: *xiyu-env
+      ASR_BACKEND: gguf
+      DEVICE: ${GGUF_DEVICE:-cpu}
+      NGPU: ${GGUF_NGPU:-0}
+      NCPU: ${GGUF_NCPU:-8}
+      GGUF_LIB_DIR: ${GGUF_LIB_DIR:-/app/llama_cpp/lib}
+
   xiyu-sensevoice:
     <<: *xiyu-base
     environment:
@@ -267,6 +301,13 @@ services:
       DIARIZER_NUM_SPEAKERS: ${DIARIZER_NUM_SPEAKERS:-}
       DIARIZER_MIN_SPEAKERS: ${DIARIZER_MIN_SPEAKERS:-}
       DIARIZER_MAX_SPEAKERS: ${DIARIZER_MAX_SPEAKERS:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ClearVoice denoise microservice (internal-only)
   xiyu-clearvoice:

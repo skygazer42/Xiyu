@@ -100,8 +100,6 @@ def test_whisper_backend_hotwords_are_passed_via_initial_prompt(monkeypatch):
     assert "OpenAI" in prompt
     assert "Xiyu" in prompt
 
-    # faster-whisper has a dedicated hotwords hint; our backend should pass it when available.
-    hot = str(called_kwargs.get("hotwords") or "")
-    assert "OpenAI" in hot
-    assert "Xiyu" in hot
-
+    # Do not pass faster-whisper's `hotwords` hint: it can trigger decoding-length
+    # errors on longer audio with many injected terms. Keep injection via initial_prompt.
+    assert called_kwargs.get("hotwords") in (None, "")

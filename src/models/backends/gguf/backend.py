@@ -409,6 +409,7 @@ class GGUFBackend(ASRBackend):
         current_pos = n_input_tokens
         decoder_utf8 = ByteDecoder()
         tokens_generated = 0
+        repetition_break = False
 
         for step in range(self.config.n_predict):
             logits_ptr = llama_lib.llama_get_logits(self._ctx)
@@ -431,6 +432,7 @@ class GGUFBackend(ASRBackend):
                 consecutive_cnt += 1
                 if consecutive_cnt > 20:
                     logger.warning("Detected abnormal repetition, breaking")
+                    repetition_break = True
                     break
             else:
                 last_token_id = token_id
@@ -452,7 +454,47 @@ class GGUFBackend(ASRBackend):
         llama_lib.llama_batch_free(batch_text)
         t_gen = time.perf_counter() - t_gen_start
 
-        return generated_text.strip(), tokens_generated, t_inject, t_gen
+        return generated_text.strip(), tokens_generated, t_inject, t_gen, repetition_break
+
+    @staticmethod
+    def _count_cjk_chars(text: str) -> int:
+        # Basic CJK Unified Ideographs range; good enough for a lightweight heuristic.
+        return sum(1 for ch in str(text or "") if "\u4e00" <= ch <= "\u9fff")
+
+    def _should_fallback_to_ctc(self, *, llm_text: str, ctc_text: str, repetition_break: bool) -> bool:
+        """Decide whether to use CTC text instead of LLM-decoded text.
+
+        In practice, some GGUF decoder models can occasionally get stuck in
+        short filler loops ("嗯嗯嗯...") or ASCII repetition. When that happens,
+        the CTC output is usually far more useful than returning nonsense.
+        """
+        if repetition_break:
+            return True
+
+        ctc = str(ctc_text or "").strip()
+        llm = str(llm_text or "").strip()
+        if not ctc:
+            return False
+        if not llm:
+            return True
+
+        # If CTC has substantial CJK content but LLM output doesn't, treat LLM
+        # output as unreliable.
+        ctc_cjk = self._count_cjk_chars(ctc)
+        llm_cjk = self._count_cjk_chars(llm)
+        if ctc_cjk >= 10 and llm_cjk < max(2, int(ctc_cjk * 0.2)):
+            return True
+
+        # If LLM output is far shorter than CTC for longer utterances, it's
+        # likely a partial or collapsed output.
+        if len(ctc) >= 60 and len(llm) < int(len(ctc) * 0.3):
+            return True
+
+        # Guard against trivial single-character loops.
+        if len(llm) >= 20 and len(set(llm)) <= 3:
+            return True
+
+        return False
 
     def transcribe(
         self,
@@ -534,9 +576,16 @@ class GGUFBackend(ASRBackend):
                 f"Reduce chunk duration (VAD_MAX_SEGMENT_MS / SPEAKER_EXTERNAL_DIARIZER_MAX_TURN_DURATION_S) "
                 f"or increase GGUF_N_BATCH/GGUF_N_CTX."
             )
-        text, n_gen, t_inject, t_gen = self._decode_llm(full_embd, full_embd.shape[0])
+        text, n_gen, t_inject, t_gen, repetition_break = self._decode_llm(full_embd, full_embd.shape[0])
         timings.inject = t_inject
         timings.llm_generate = t_gen
+
+        # Fallback: return CTC output when the LLM-decoder collapses into
+        # repetition / filler text. This keeps the backend usable in real
+        # deployments even when the decoder model is unstable on certain inputs.
+        if self._should_fallback_to_ctc(llm_text=text, ctc_text=ctc_text, repetition_break=repetition_break):
+            logger.info("[gguf] LLM output looks unreliable; falling back to CTC text")
+            text = ctc_text
 
         # 6. 时间戳对齐
         t_align = time.perf_counter()

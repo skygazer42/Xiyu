@@ -78,7 +78,9 @@ class WhisperBackend(ASRBackend):
 
     @property
     def supports_hotwords(self) -> bool:
-        # Best-effort: we pass hotwords into `hotwords` (preferred) and/or initial_prompt.
+        # Best-effort: we inject hotwords via `initial_prompt` (stable across
+        # faster-whisper versions and avoids decoding-length errors seen with the
+        # dedicated `hotwords` hint on longer audio).
         return True
 
     def load(self) -> None:
@@ -160,9 +162,13 @@ class WhisperBackend(ASRBackend):
             transcribe_kwargs["language"] = self.language
         if hotwords and str(hotwords).strip():
             hot = str(hotwords).strip()
-            # Prefer the dedicated `hotwords` hint when available (faster-whisper),
-            # but also provide a short initial_prompt as extra context.
-            transcribe_kwargs["hotwords"] = ", ".join(_parse_hotword_terms(hot)[:50])
+            # NOTE: faster-whisper exposes a dedicated `hotwords` hint, but with
+            # some versions/models it can raise:
+            #   ValueError("The maximum decoding length must be > 0")
+            # especially on longer audio with many hotword terms.
+            #
+            # We keep hotword injection via a short `initial_prompt`, which is
+            # stable across versions and avoids prompt-length overflows.
             transcribe_kwargs["initial_prompt"] = _format_initial_prompt(hot)
 
         # VAD tuning (only used when vad_filter=True).
