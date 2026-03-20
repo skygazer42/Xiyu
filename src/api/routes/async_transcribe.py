@@ -24,6 +24,7 @@ from src.api.dependencies import process_audio_file
 from src.config import settings
 from src.core.engine import transcription_engine
 from src.core.task_manager import task_manager, TaskStatus
+import src.core.meeting_overview as overview_mod
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ def _handle_url_transcribe(payload: dict) -> dict:
         # `/api/v1/transcribe` endpoint so the frontend can reuse Timeline/Exports.
         if task_id:
             task_manager.update_progress(task_id, progress=98, message="整理输出")
-        return {
+        out = {
             "code": 0,
             "text": result.get("text", ""),
             "text_accu": result.get("text_accu"),
@@ -209,6 +210,24 @@ def _handle_url_transcribe(payload: dict) -> dict:
             "transcript": result.get("transcript"),
             "raw_text": result.get("raw_text", ""),
         }
+        # Best-effort meeting overview (inline in async task result).
+        if (
+            bool(getattr(settings, "llm_enable", False))
+            and bool(getattr(settings, "meeting_overview_enable", True))
+            and bool(getattr(settings, "meeting_overview_auto", True))
+        ):
+            try:
+                source_text = overview_mod.build_overview_source_text(result)
+                if source_text:
+                    out["overview"] = overview_mod.generate_meeting_overview_sync(
+                        source_text,
+                        role=str(getattr(settings, "meeting_overview_role", "gov_overview") or "gov_overview"),
+                        max_input_chars=int(getattr(settings, "meeting_overview_max_input_chars", 12000) or 12000),
+                        chunk_chars=int(getattr(settings, "meeting_overview_chunk_chars", 6000) or 6000),
+                    )
+            except Exception as e:
+                logger.warning("Generate meeting overview failed (ignored): %s", e)
+        return out
 
     finally:
         # 清理临时文件
@@ -276,7 +295,7 @@ def _handle_file_transcribe(payload: dict) -> dict:
 
         if task_id:
             task_manager.update_progress(task_id, progress=98, message="整理输出")
-        return {
+        out = {
             "code": 0,
             "text": result.get("text", ""),
             "text_accu": result.get("text_accu"),
@@ -285,6 +304,23 @@ def _handle_file_transcribe(payload: dict) -> dict:
             "transcript": result.get("transcript"),
             "raw_text": result.get("raw_text", ""),
         }
+        if (
+            bool(getattr(settings, "llm_enable", False))
+            and bool(getattr(settings, "meeting_overview_enable", True))
+            and bool(getattr(settings, "meeting_overview_auto", True))
+        ):
+            try:
+                source_text = overview_mod.build_overview_source_text(result)
+                if source_text:
+                    out["overview"] = overview_mod.generate_meeting_overview_sync(
+                        source_text,
+                        role=str(getattr(settings, "meeting_overview_role", "gov_overview") or "gov_overview"),
+                        max_input_chars=int(getattr(settings, "meeting_overview_max_input_chars", 12000) or 12000),
+                        chunk_chars=int(getattr(settings, "meeting_overview_chunk_chars", 6000) or 6000),
+                    )
+            except Exception as e:
+                logger.warning("Generate meeting overview failed (ignored): %s", e)
+        return out
     finally:
         # Always cleanup temp files to avoid filling disk on long meetings.
         try:

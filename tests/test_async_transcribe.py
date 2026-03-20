@@ -194,3 +194,43 @@ def test_handle_url_transcribe_returns_engine_schema():
     assert out["sentences"][0]["speaker_id"] == 0
     assert isinstance(out["speaker_turns"][0]["start"], int)
     assert isinstance(out["speaker_turns"][0]["end"], int)
+
+
+def test_handle_url_transcribe_includes_overview_when_enabled(monkeypatch):
+    """异步 URL 转写任务完成后应自动生成会议概览（当启用开关时）。"""
+    from unittest.mock import MagicMock, patch
+
+    import src.api.routes.async_transcribe as async_mod
+
+    monkeypatch.setattr(async_mod.settings, "llm_enable", True, raising=False)
+    monkeypatch.setattr(async_mod.settings, "meeting_overview_enable", True, raising=False)
+    monkeypatch.setattr(async_mod.settings, "meeting_overview_auto", True, raising=False)
+    monkeypatch.setattr(async_mod.settings, "meeting_overview_role", "gov_overview", raising=False)
+
+    fake_engine_result = {
+        "code": 0,
+        "text": "你好",
+        "sentences": [{"text": "你好", "start": 0, "end": 500}],
+        "speaker_turns": None,
+        "raw_text": "你好",
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.content = b"RIFF....WAVEfmt "
+    mock_resp.raise_for_status.return_value = None
+
+    mock_httpx_client = MagicMock()
+    mock_httpx_client.__enter__.return_value = mock_httpx_client
+    mock_httpx_client.__exit__.return_value = None
+    mock_httpx_client.get.return_value = mock_resp
+
+    with (
+        patch.object(async_mod, "httpx") as mock_httpx,
+        patch.object(async_mod, "_convert_path_to_pcm16le_bytes", return_value=b"\x00" * (16000 * 2)),
+        patch.object(async_mod.transcription_engine, "transcribe_long_audio", return_value=fake_engine_result),
+        patch("src.core.meeting_overview.generate_meeting_overview_sync", return_value="OVERVIEW"),
+    ):
+        mock_httpx.Client.return_value = mock_httpx_client
+        out = async_mod._handle_url_transcribe({"url": "https://example.com/audio.wav"})
+
+    assert out.get("overview") == "OVERVIEW"
