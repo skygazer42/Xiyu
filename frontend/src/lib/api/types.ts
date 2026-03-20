@@ -88,6 +88,7 @@ export interface TaskResultResponse {
   data?:
     | { task_id: string; progress?: number | null; detail?: string | null }
     | TranscribeResponse
+    | { overview: string }
 }
 
 // 视频转写相关

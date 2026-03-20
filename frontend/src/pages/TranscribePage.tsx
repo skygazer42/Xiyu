@@ -37,6 +37,7 @@ type AsyncTranscribeTask = Task & {
 
 const URL_TASK_MAX_POLL_MS = 10 * 60 * 1000
 const FILE_TASK_MAX_POLL_MS = 24 * 60 * 60 * 1000
+const OVERVIEW_TASK_MAX_POLL_MS = 5 * 60 * 1000
 const TASKS_STORAGE_KEY = 'xiyu_async_tasks_v1'
 
 function downloadBlob(filename: string, blob: Blob) {
@@ -130,6 +131,9 @@ export default function TranscribePage() {
   const [transcribePhase, setTranscribePhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
   const [elapsedMs, setElapsedMs] = useState(0)
   const [isEnhancing, setIsEnhancing] = useState(false)
+  const [overviewTaskId, setOverviewTaskId] = useState<string | null>(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [overviewError, setOverviewError] = useState<string | null>(null)
 
   const ensembleQuickMode = useMemo(() => {
     if (!ensembleOptions.apply_llm) {
@@ -148,8 +152,15 @@ export default function TranscribePage() {
 
   const taskPollingTimersRef = useRef<Record<string, number>>({})
   const taskPollingStartedAtRef = useRef<Record<string, number>>({})
+  const overviewPollingTimerRef = useRef<number | null>(null)
+  const overviewPollingStartedAtRef = useRef<number | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const transcribeStartedAtRef = useRef<number | null>(null)
+  const resultRef = useRef<TranscribeResponse | null>(null)
+
+  useEffect(() => {
+    resultRef.current = result
+  }, [result])
 
   useEffect(() => {
     if (!isTranscribing) {
@@ -174,13 +185,25 @@ export default function TranscribePage() {
     abortControllerRef.current = null
   }, [])
 
+  const stopOverviewPolling = useCallback(() => {
+    if (overviewPollingTimerRef.current !== null) {
+      window.clearTimeout(overviewPollingTimerRef.current)
+      overviewPollingTimerRef.current = null
+    }
+    overviewPollingStartedAtRef.current = null
+  }, [])
+
   const handleCancel = useCallback(() => {
     const controller = abortControllerRef.current
     if (!controller) return
     controller.abort()
     resetTranscribeUiState()
+    stopOverviewPolling()
+    setOverviewTaskId(null)
+    setOverviewLoading(false)
+    setOverviewError(null)
     setTranscribing(false)
-  }, [resetTranscribeUiState, setTranscribing])
+  }, [resetTranscribeUiState, setTranscribing, stopOverviewPolling])
 
   const stopTaskPolling = useCallback((taskId: string) => {
     const timerId = taskPollingTimersRef.current[taskId]
@@ -195,6 +218,9 @@ export default function TranscribePage() {
     return () => {
       for (const timerId of Object.values(taskPollingTimersRef.current)) {
         window.clearTimeout(timerId)
+      }
+      if (overviewPollingTimerRef.current !== null) {
+        window.clearTimeout(overviewPollingTimerRef.current)
       }
       taskPollingTimersRef.current = {}
       taskPollingStartedAtRef.current = {}
@@ -227,6 +253,72 @@ export default function TranscribePage() {
     const obj = value as { sentences?: unknown; text?: unknown; code?: unknown }
     return Array.isArray(obj.sentences) && typeof obj.text === 'string' && typeof obj.code === 'number'
   }, [])
+
+  const isMeetingOverviewResult = useCallback((value: unknown): value is { overview: string } => {
+    if (!value || typeof value !== 'object') return false
+    const obj = value as { overview?: unknown }
+    return typeof obj.overview === 'string' && obj.overview.trim().length > 0
+  }, [])
+
+  const startOverviewPolling = useCallback(
+    (taskId: string, backendBaseUrl: string) => {
+      if (!taskId) return
+
+      stopOverviewPolling()
+      setOverviewTaskId(taskId)
+      setOverviewLoading(true)
+      setOverviewError(null)
+      overviewPollingStartedAtRef.current = Date.now()
+
+      const pollOnce = async () => {
+        const startedAt = overviewPollingStartedAtRef.current ?? Date.now()
+        if (Date.now() - startedAt > OVERVIEW_TASK_MAX_POLL_MS) {
+          stopOverviewPolling()
+          setOverviewLoading(false)
+          setOverviewError('会议概览生成超时，请稍后重试')
+          return
+        }
+
+        try {
+          const response = await getTaskResult(taskId, { delete: false }, { baseURL: backendBaseUrl })
+          if (response.status === 'pending' || response.status === 'processing') {
+            overviewPollingTimerRef.current = window.setTimeout(pollOnce, 1500)
+            return
+          }
+
+          if (response.status === 'success') {
+            stopOverviewPolling()
+            setOverviewLoading(false)
+
+            const data = response.data
+            if (!isMeetingOverviewResult(data)) {
+              setOverviewError('会议概览返回格式异常')
+              return
+            }
+
+            // Merge the overview text into the current result (best-effort).
+            const current = resultRef.current
+            if (current) {
+              setResult({ ...current, overview: data.overview })
+            }
+            return
+          }
+
+          // error
+          stopOverviewPolling()
+          setOverviewLoading(false)
+          setOverviewError(response.message || '会议概览生成失败')
+        } catch (error) {
+          stopOverviewPolling()
+          setOverviewLoading(false)
+          setOverviewError(error instanceof Error ? error.message : '会议概览请求失败')
+        }
+      }
+
+      void pollOnce()
+    },
+    [isMeetingOverviewResult, setResult, stopOverviewPolling]
+  )
 
   const startTaskPolling = useCallback(
     (taskId: string, backendBaseUrl: string, kind: AsyncTranscribeTask['kind']) => {
@@ -447,6 +539,10 @@ export default function TranscribePage() {
     setTranscribePhase('uploading')
     setEnsembleResult(null)
     setResult(null)
+    stopOverviewPolling()
+    setOverviewTaskId(null)
+    setOverviewLoading(false)
+    setOverviewError(null)
     setResultFilename(undefined)
 
     try {
@@ -474,6 +570,13 @@ export default function TranscribePage() {
         if (response.code === 0) {
           setResult(response)
           setResultFilename(files[0].name.replace(/\.[^/.]+$/, ''))
+          if (response.overview) {
+            setOverviewTaskId(null)
+            setOverviewLoading(false)
+            setOverviewError(null)
+          } else if (response.overview_task_id) {
+            startOverviewPolling(response.overview_task_id, getApiBaseUrl())
+          }
           // 保存到历史记录
           addItem({
             filename: files[0].name,
@@ -803,6 +906,10 @@ export default function TranscribePage() {
 
     setEnsembleResult(null)
     setResult(data)
+    stopOverviewPolling()
+    setOverviewTaskId(null)
+    setOverviewLoading(false)
+    setOverviewError(null)
     setResultFilename((task.filename || task.id).replace(/\.[^/.]+$/, ''))
     setSelectedSentence(null)
     setSelectedIndex(undefined)
@@ -868,6 +975,10 @@ export default function TranscribePage() {
     clearFiles()
     setEnsembleResult(null)
     setResult(null)
+    stopOverviewPolling()
+    setOverviewTaskId(null)
+    setOverviewLoading(false)
+    setOverviewError(null)
     setResultFilename(undefined)
     setSelectedSentence(null)
     setSelectedIndex(undefined)
@@ -1120,10 +1231,61 @@ export default function TranscribePage() {
       )}
 
       {result && (
+        <>
+          {(Boolean(result.overview) || overviewLoading || Boolean(overviewError) || Boolean(overviewTaskId)) && (
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">会议概览</CardTitle>
+                  {result.overview ? null : overviewTaskId ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={overviewLoading}
+                      onClick={() => startOverviewPolling(overviewTaskId, getApiBaseUrl())}
+                    >
+                      {overviewLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          生成中
+                        </>
+                      ) : (
+                        '刷新'
+                      )}
+                    </Button>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {overviewError ? <p className="text-sm text-destructive">{overviewError}</p> : null}
+                {overviewLoading && !result.overview ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在生成会议概览...
+                  </div>
+                ) : null}
+                {result.overview ? (
+                  <div className="space-y-3">
+                    {String(result.overview)
+                      .trim()
+                      .split(/\n\s*\n/g)
+                      .filter(Boolean)
+                      .map((p, idx) => (
+                        <p key={idx} className="text-sm leading-relaxed whitespace-pre-wrap">
+                          {p.trim()}
+                        </p>
+                      ))}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
         <TranscriptView
           result={result}
           filename={resultFilename}
         />
+        </>
       )}
 
       {/* 空状态 */}
