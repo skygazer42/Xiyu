@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/logo.png" alt="Xiyu 悉语" width="120" />
+<img src="docs/images/logo.png" alt="Xiyu 悉语" width="240" />
 
 <h1>Xiyu 悉语</h1>
 
@@ -86,6 +86,10 @@ docker compose up -d --build
 ## 🏗️ 架构
 
 推荐部署形态是「单入口 Router + 内部多后端」：对外只发布一个端口（`${PORT:-18200}:8000`），`xiyu-router` 同时承载 Web UI、统一 API 与智能路由；其余模型服务只在 Docker 网络内互通，不对宿主机暴露端口，更安全也更易维护。
+
+<p align="center">
+  <img src="docs/images/architecture.png" alt="Xiyu 悉语架构图" width="860" />
+</p>
 
 ```mermaid
 flowchart TB
