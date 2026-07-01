@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="docs/images/logo.png" alt="Xiyu 悉语" width="240" />
-
-<h1>Xiyu 悉语</h1>
+<img src="docs/images/logo.png" alt="项目标志" width="240" />
 
 <p><b>面向中文会议场景的自托管语音转写服务</b><br/>多 ASR 后端 · 说话人分离 · 音频降噪 · 热词纠错 · 可选 LLM 润色，开箱即用、单端口部署。</p>
 
@@ -88,27 +86,8 @@ docker compose up -d --build
 推荐部署形态是「单入口 Router + 内部多后端」：对外只发布一个端口（`${PORT:-18200}:8000`），`xiyu-router` 同时承载 Web UI、统一 API 与智能路由；其余模型服务只在 Docker 网络内互通，不对宿主机暴露端口，更安全也更易维护。
 
 <p align="center">
-  <img src="docs/images/architecture.png" alt="Xiyu 悉语架构图" width="860" />
+  <img src="docs/images/architecture.png" alt="架构图" width="860" />
 </p>
-
-```mermaid
-flowchart TB
-    Client["浏览器 / API 客户端 / WebSocket"]
-    Client -->|":18200"| Router
-
-    subgraph Docker["Docker 网络（内部 :8000 互通）"]
-        Router["xiyu-router<br/>Web UI · 统一 API · 智能路由"]
-        Router --> Wrap["xiyu-qwen3<br/>(Qwen3 包装)"]
-        Wrap --> Vllm["qwen3-asr<br/>(vLLM · GPU)"]
-        Router --> PT["xiyu-pytorch<br/>(FunASR · GPU)"]
-        Router --> SV["xiyu-sensevoice<br/>(GPU)"]
-        Router --> WH["xiyu-whisper<br/>(large-v3 · GPU)"]
-        Router --> OX["xiyu-onnx<br/>(CPU)"]
-        Router --> GG["xiyu-gguf<br/>(Fun-ASR-Nano · CPU)"]
-        Router --> DZ["xiyu-diarizer<br/>(pyannote · 说话人分离)"]
-        Router --> CV["xiyu-clearvoice<br/>(MossFormer2 · 降噪)"]
-    end
-```
 
 > 内部容器仍监听 `8000`，但那是容器间通信端口，不作为默认对外端口。需要「每个后端独立暴露宿主机端口」的旧形态（A/B 对比、压测、逐后端排障）仍保留在 [Legacy 多模型入口](#-legacy-多模型入口)。
 
